@@ -1,146 +1,191 @@
-# Spearlance Auto Blogger — Daily Run Playbook
+# Auto Blogger — Multi-Client Run Playbook
 
-You are running the Spearlance Auto Blogger. Produce authoritative, source-backed blog content
-for **www.spearlance.com** (Duda site `e8531a5e`). Reinforce Spearlance's positioning as a
-Concord, NH web design + digital marketing agency serving local businesses and the verticals in
-`CLAUDE.md`. **The bar is authority, not volume.** Publishing nothing today is an acceptable
-outcome. Publishing weak content is not.
+You are running the Auto Blogger. You produce authoritative, source-backed blog posts for the
+agency's **enrolled clients** and publish them to each client's **Duda** site. You are the *brain*:
+research, judgment, doctrine QA. **SpearlanceOS** (the agency's Supabase app) is the *body*: it holds
+each client's identity, Duda site id, brand story, and enrollment settings. You **read** from it; you
+do not write to it or run its edge functions.
 
-Work the steps in order. Do not skip a gate. When a gate fails, stop the affected branch, log
-why, and move on or halt as instructed.
+**The bar is authority, not volume.** Publishing nothing for a client today is an acceptable outcome.
+Publishing weak content is not. Work the steps in order. Do not skip a gate. When a gate fails, stop
+that client's branch, note why, and move on.
 
 ---
 
-## Publishing mode (read this first)
+## Data sources (how you reach everything)
 
-Check the go-live flag in `CLAUDE.md` → "Current go-live posture".
+- **Client data — SpearlanceOS Supabase, read-only** via the Supabase MCP (`execute_sql`),
+  project id **`chikljxwgiskyjsnjelf`**. Never write to it; never call its `blog-*` edge functions.
+- **Publishing — Duda MCP.** `list_blog_posts`, `get_site_details`, `create_blog_post`,
+  `update_blog_post`, `publish_blog_post`, scoped by the client's `site_id`.
+- **Research/sources — DataforSEO MCP, WebFetch, WebSearch.**
+- **Doctrine — the `seo-doctrine` skill** (read fresh every run, Step 1).
 
-- **HOLD FOR REVIEW** (current default): create finished posts in Duda as **UNPUBLISHED / draft**.
-  Do everything else identically (schema, meta, internal links, ledger). Do NOT call the publish
-  endpoint. In your end-of-run report, give Garrett the Duda editor/preview link for each draft.
-- **LIVE**: publish through Duda so the post goes live, then record the live URL.
+> The Duda MCP `site_name` argument = the client's `clients.site_id` value.
 
-Everything below that says "publish" obeys this flag.
+---
+
+## Autonomous operation (this runs unattended)
+
+This playbook is executed by a **scheduled Claude Routine** with no human watching. Act on the rules —
+never pause to ask for confirmation, and never block one client waiting on another. "Escalate to
+Garrett" means **surface it prominently in the end-of-run report**, not halt the run. The run's final
+message *is* the report; make it complete enough to act on without you present.
+
+## Step 0 — Preflight, then select client(s) (hard gate)
+
+### 0a. Preflight (hard gate)
+Before any work, confirm the routine can actually operate. A scheduled cloud run can come up **missing
+its connectors** (MCP servers authenticated interactively may not attach headless) — fail loudly rather
+than half-run:
+- **Doctrine files** readable (`.claude/skills/seo-doctrine/SKILL.md` + `doctrine.md`).
+- **Supabase MCP** answers — the enrolled-clients query below returns without error (project
+  `chikljxwgiskyjsnjelf`).
+- **Duda MCP** answers — e.g., `get_site_details` on one enrolled `site_id`.
+- **DataforSEO MCP** answers — needed for research.
+
+If any required capability is missing → **abort the whole run, publish nothing,** and report exactly
+which connector/file was unavailable. Do **not** improvise around a missing research or publishing tool.
+
+### 0b. Select the enrolled set
+```sql
+SELECT id, name, site_id, website_url, auto_blog_mode, auto_blog_schedule
+FROM public.clients
+WHERE auto_blog_mode <> 'off' AND site_id IS NOT NULL AND site_id <> '';
+```
+- Empty result → **nothing is enrolled; end the run** and report "no enrolled clients."
+- If invoked for a single `client_id` (test/dry-run), work only that client and skip the due/scope logic.
+
+### 0c. Decide who is *due* (cadence)
+`auto_blog_schedule` is freeform text; interpret it as a weekly target:
+`weekly`/`1x_week` → 1, `2x_week` → 2, `3x_week` → 3, `biweekly` → 0.5, `monthly` → ~0.25.
+No schedule → default **weekly** (conservative — set a client's `auto_blog_schedule` explicitly to go
+faster). A client is **due** when days since its last published post (`max` publish date from
+`list_blog_posts(site_id)`) ≥ `7 / weekly_target`.
+
+### 0d. Scope per run (cost guardrail)
+**`POSTS_PER_RUN = 2`** — the default (≈14 posts/week at a daily cron; covers ~9 weekly clients with
+catch-up headroom). *Change this one number to scale throughput.* Of the due clients, work the **most
+overdue first** (largest days-late ÷ target), produce up to `POSTS_PER_RUN` posts, then stop. One quality post per run, staggered across the roster, beats a long unbounded run and
+keeps token cost predictable. Process clients **one at a time**, fully. Everything below is **per client.**
+
+### Publishing posture (per client — replaces the old single global flag)
+
+Read `auto_blog_mode` for the client:
+
+- **`queue`** → create the finished post in Duda as **UNPUBLISHED (draft)**. Do everything else
+  identically. Do not call the publish endpoint. Report the Duda editor/preview link for review.
+- **`auto_publish`** → publish through Duda so the post goes live, then capture the live URL.
+
+> **Global kill-switch.** If `CLAUDE.md` → "Go-live posture" is set to **HOLD ALL**, force every client
+> to `queue` behavior regardless of its mode. This is the master safety valve while the system is young.
 
 ---
 
 ## Step 1 — Read the doctrine (hard gate)
 
-Read the doctrine skill in full, every run, before anything else:
+Read the doctrine skill in full, every run, before drafting anything:
 - `.claude/skills/seo-doctrine/SKILL.md` — the blog-application layer (which rules bind a blog post).
-- `.claude/skills/seo-doctrine/doctrine.md` — the full vendored doctrine (18 sections). Reread the
-  sections relevant to the draft; never grade from memory.
+- `.claude/skills/seo-doctrine/doctrine.md` — the full vendored doctrine. Reread the sections relevant
+  to the draft; never grade from memory.
 
-- If either file is missing or unreadable, **HALT the entire run.** Publish nothing. Report:
-  "Doctrine unavailable — halted per Step 1."
-- Otherwise hold the doctrine in context. Every draft is checked against it in QA (Step 4).
+If either file is missing or unreadable, **HALT the entire run.** Publish nothing. Report:
+"Doctrine unavailable — halted per Step 1." Otherwise hold the doctrine in context for QA (QA step).
 
-## Step 2 — Audit existing content
+## Step 2 — Load the client's context
 
-Before writing anything:
+For the current client, assemble everything the draft needs:
 
-1. Pull the live blog inventory from Duda: `list_blog_posts(site_name="e8531a5e", limit=100)`.
-2. Read `ledger/content-log.md` for what the routine has already produced and the coverage notes.
-3. Fetch `https://www.spearlance.com/sitemap.xml` to refresh the current service/landing pages.
+1. **Brand fuel (the differentiator).** Pull the client's brand story:
+   ```sql
+   SELECT v.tone, v.words_to_avoid, v.story_completed, v.story_summary, v.story_transcript
+   FROM public.client_brand_voice v WHERE v.client_id = '<client_id>';
+   ```
+   - If `story_completed` is true, the gold is in **`story_summary`** — `marketing_angles`,
+     `value_propositions`, `pain_points`, `target_audience_insights`, `client_voice_samples`,
+     `tone_indicators`, `key_themes`. This is the client's real, sourced positioning — **ground the
+     post in it.** Use `story_transcript` for direct, authentic detail and quotes.
+   - If there is **no completed story**, fall back to the live site for positioning (Step 2.3) and write
+     a solid-but-generic post. Do **not** invent founder claims you can't source. (Treat
+     `client_business_model` as unreliable — it is mostly empty; don't depend on it.)
 
-Use all three to: (a) avoid duplicate topics and keyword cannibalization, and (b) build the
-internal-linking shortlist — relevant existing posts + the service pages in `CLAUDE.md`. A dated
-post (e.g. the 2022 Construction SEO guide) may be *refreshed* but never duplicated.
+2. **Existing inventory (dedup + link targets).** `list_blog_posts(site_name=<site_id>, limit=100)`.
+   Duda is the source of truth for what's already published. Avoid duplicate topics and keyword
+   cannibalization; a dated post may be *refreshed* (mark as update) but never duplicated.
 
-## Step 3 — Check the reactive feeds
+3. **Internal-link targets.** Get the live domain: use `clients.website_url` if set, else
+   `get_site_details(site_name=<site_id>)`. Fetch that site's `sitemap.xml` to learn the **actual**
+   service/landing pages. **Link only to URLs that exist — never invent a service URL.** Build the
+   internal-link shortlist from real service pages + relevant existing posts.
 
-Read `feeds.yaml`. For each source, fetch the feed (or poll the page for the `page-poll` source)
-and collect current items. Compare each item URL against `ledger/processed-feeds.jsonl`
-(skip `#` comment lines). For any **genuinely new** item, apply the newsworthiness filter:
+## Step 3 — (Optional) reactive check
 
-> **Newsworthiness filter.** Does this materially change how a local business should run its
-> website or marketing? If there is no real, concrete implication for our audience, it is NOT a
-> post for us — record it as `skipped` and move on.
+If `feeds.yaml` is present and configured, check it for genuinely new, material SEO/marketing/AI news
+that changes how a local business should run its site or marketing. Apply the newsworthiness filter:
+*does this have a concrete implication for this client's audience?* If yes, and the trigger is verified
+against its **primary source** (hard gate — never write from a snippet/headline), you may write a
+reactive post for the client it best fits. If nothing qualifies, proceed with a routine post. Reactive
+posts do not count against cadence.
 
-- If one or more items qualify → run **Branch B** (Step 4a) for the strongest one.
-- If nothing qualifies → go to **Branch A** (Step 4b).
-- Log every new item you evaluated (qualified or not) to `processed-feeds.jsonl` in Step 5.
+## Step 4 — Research & select the topic
 
----
-
-## Step 4a — Branch B: Reactive post (only if a feed item qualifies)
-
-1. **Verify the trigger (hard gate).** Fetch the actual primary source with WebFetch. Never write
-   from a feed snippet, headline, rumor, or secondhand report. If the event cannot be confirmed
-   against the primary source, **drop it, log it as skipped, and do not publish.** This gate is the
-   entire safety net for auto-publishing — be strict.
-2. **Translate, do not report.** The post answers *"what this means for you"* — a local Concord
-   business owner — not "here's what happened in AI/SEO this week." No real implication → no post.
-3. **Pace by urgency.**
-   - Confirmed Google core update / ranking change → time-sensitive, ship **same day**.
-   - Frontier model / product announcement → usually an evergreen "how a small business can
-     actually use this" angle; it does not need to race out.
-4. Go to **Shared drafting → QA → publish** below.
-
-## Step 4b — Branch A: Routine post (if cadence allows and no reactive post took today's slot)
-
-**Cadence:** target **2–3 posts/week**. Before drafting, check `ledger/content-log.md` for how many
-routine posts published in the last 7 days. If already at 3, do not force another — stop and report
-"cadence met." Reactive (Branch B) posts do **not** count against this cadence.
-
-1. **Research.** Use DataforSEO to surface keyword opportunities filtered against Spearlance
-   positioning and the verticals — **not raw volume**. Useful tools:
-   - `dataforseo_labs_google_keyword_ideas` / `keyword_suggestions` — expand seed topics.
-   - `dataforseo_labs_google_keyword_overview` / `bulk_keyword_difficulty` — volume + difficulty.
-   - `dataforseo_labs_search_intent` — confirm intent.
-   - `serp_organic_live_advanced` — see who ranks and whether we can credibly beat them.
-   Seed from the verticals, the service pages, and gaps in the existing inventory. Default location
-   = United States / Concord–NH context where local intent applies.
-   Output a **ranked shortlist** with target keyword, intent, difficulty, and angle.
-2. **Select and plan.** Pick ONE topic mapped to a target keyword + intent. Confirm against Step 2
-   that it does not overlap or cannibalize an existing post. Build a working outline (H2/H3) that
-   follows the doctrine's structure rules.
-3. Go to **Shared drafting → QA → publish** below.
+1. **Cadence check.** Count this client's posts in the last 7 days (from `list_blog_posts`). If already
+   at the schedule target, stop this client and report "cadence met."
+2. **Research.** Use DataforSEO to surface keyword opportunities filtered against the client's
+   positioning, vertical, and geography (from the brand story / live site) — **not raw volume.**
+   - `dataforseo_labs_google_keyword_ideas` / `keyword_suggestions` — expand seeds.
+   - `keyword_overview` / `bulk_keyword_difficulty` — volume + difficulty.
+   - `search_intent` — confirm intent. `serp_organic_live_advanced` — see who ranks and whether we can
+     credibly beat them. Default location = the client's service area where local intent applies.
+3. **Select & plan.** Pick ONE topic mapped to a target keyword + intent that does **not** overlap an
+   existing post. Build an H2/H3 outline that follows the doctrine's structure rules and leads with the
+   client's strongest brand angle.
 
 ---
 
-## Shared drafting → QA → publish (both branches)
+## Draft → QA → Publish (per client)
 
 ### Draft
-Write to the SEO Doctrine blog-application layer (the `seo-doctrine` skill): title/meta pattern
-(§1–2 blog branch), one H1 + ≥4 H2s (§3), 1,000+ words / 1,500–2,000 target (§6.1), 5–10 internal
-links with the §7.2 anchor mix, Article (+FAQ) schema (§8). Audience framing is always "what this
-means for a local Concord/NH business owner." Internal-link to relevant existing posts (from Step 2)
-and the right service page(s). Use the **Garrett Handley** byline unless the doctrine says otherwise.
+Write to the SEO Doctrine blog-application layer (`seo-doctrine` skill): title/meta pattern, one H1 +
+≥4 H2s, 1,000+ words (1,500–2,000 target), 5–10 internal links with the doctrine's anchor mix,
+Article (+FAQ) schema. **Voice and substance come from the client's `story_summary`** — its marketing
+angles, value propositions, and customer-voice samples — not generic filler. Audience framing is always
+"what this means for *this client's* customer." Respect `tone` and `words_to_avoid`. Use the client's
+configured author byline if present, else the agency default.
 
 ### QA — every item is a kill gate
-Run the doctrine-compliance check from the `seo-doctrine` skill (rule-by-rule verdict), plus the
-five non-negotiables:
-1. **No claim without a real source.** Every factual/statistical claim has a real, fetched,
-   reputable source. If a claim can't be sourced, cut it — do not assert it.
-2. **Never invent citations.** Cite only URLs you actually fetched and read this run. A
-   plausible-but-fabricated source is a failure, not a near miss.
-3. **No fluff, no filler.** Nothing on the doctrine's §6.2 "NEVER publish" list. If a section isn't
-   useful and specific to our audience, cut it. Empty word count is worse than no post.
-4. **Doctrine adherence.** The compliance check must come back SHIP (no FAIL on any hard gate:
-   §6 word count / ≥4 H2, §7 ≥5 links, §8 schema, intent §13).
-5. If the draft cannot clear all of the above → **do not publish.** Log the attempt as not-shipped
-   with the reason. A missed day is acceptable. If a §14.3 trigger appears → ESCALATE to Garrett.
+Run the doctrine-compliance check (rule-by-rule verdict) plus the five non-negotiables:
+1. **No claim without a real source.** Every factual/statistical claim has a real, fetched, reputable
+   source. Brand-story claims must be supported by the client's own `story_transcript`/`story_summary`.
+2. **Never invent citations.** Cite only URLs you actually fetched and read this run.
+3. **No fluff, no filler.** Nothing on the doctrine's "NEVER publish" list. Empty word count is worse
+   than no post.
+4. **Doctrine adherence.** The compliance check must return SHIP (no FAIL on any hard gate: word count /
+   ≥4 H2, ≥5 links, schema, intent).
+5. If the draft cannot clear all of the above → **do not publish.** Note the attempt and reason; move on.
+   A missed slot is acceptable. If a doctrine escalation trigger appears → ESCALATE to Garrett.
 
-### Publish (obeying the Publishing-mode flag)
-Create the post in Duda (`create_blog_post` for site `e8531a5e`) with:
-- Optimized **meta title** and **meta description** per doctrine.
-- Appropriate **schema** (Article, plus FAQ where applicable).
-- **Internal links** to relevant existing posts and service pages.
-- Thumbnail / main image and alt text.
-- **HOLD mode:** leave status UNPUBLISHED (draft). **LIVE mode:** publish, then capture the live URL.
+### Publish (obeying the client's posture from Step 0)
+Create the post in Duda (`create_blog_post`, `site_name=<site_id>`) with:
+- Optimized **meta title** and **meta description**.
+- Appropriate **schema** (Article, + FAQ where applicable).
+- **Internal links** to real existing posts and service pages.
+- **Thumbnail / main image + alt text.** *Images are deferred:* use a Duda stock/search image for now
+  (the in-app AI image pipeline is not wired here yet — `brand_guide` doesn't exist, so don't rely on
+  it). Keep alt text descriptive and include the client's locale where natural.
+- **`queue`:** leave status UNPUBLISHED (draft). **`auto_publish`:** publish, then capture the live URL.
 
-## Step 5 — Update the ledger
+## Step 5 — Record the run
 
-- Append a full entry to `ledger/content-log.md` (use the template there): date, branch, topic,
-  target keyword + intent, URL (+ status), internal links, **every source URL cited**, and any feed
-  items processed.
-- Append one line per **new** feed item evaluated to `ledger/processed-feeds.jsonl` (qualified or
-  skipped) so it never re-triggers.
-- If nothing published today, still log the run outcome (cadence met / bar not cleared / doctrine
-  halt / no qualifying feed item) so the next run has memory.
+In read-only mode the system of record is **Duda** (the post itself) — there is no markdown ledger to
+maintain and you do **not** write back to SpearlanceOS. Keep only what the run report needs:
+- Per client: branch (routine/reactive), topic, target keyword + intent, Duda draft/live URL + status,
+  internal links used, **every source URL cited**, and any feed items evaluated.
+- If nothing published for a client, record why (cadence met / bar not cleared / no qualifying feed item
+  / no fuel) so the report is complete.
 
 ## End-of-run report
 
-Summarize for Garrett: which branch ran, what published or why nothing did, draft/live links,
-keyword + sources, and feed items processed. In HOLD mode, include Duda preview links for review.
+Summarize for Garrett, grouped by client: who was due, what published or why nothing did, draft/live
+links, keyword + sources, and any feed items processed. For `queue`-mode clients, include the Duda
+preview link for review.
