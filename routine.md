@@ -20,9 +20,11 @@ that client's branch, note why, and move on.
   read-only. Never call its `blog-*` edge functions. (The connector must NOT be configured `read_only`.)
 - **Publishing — Duda MCP.** `list_blog_posts`, `get_site_details`, `create_blog_post`,
   `update_blog_post`, `publish_blog_post`, scoped by the client's `site_id`.
-- **Research/sources — DataforSEO MCP** (works server-side; this is your sourcing engine).
-  **WebFetch/WebSearch are blocked in the scheduled cloud environment (return 403) — do not rely on
-  them**; use only if they actually return content.
+- **Web sourcing — Tavily MCP** (hosted; works in the cloud Routine where raw HTTP is blocked). Its
+  search + extract tools find and read real external sources.
+- **SEO data + backup sourcing — DataforSEO MCP** (server-side): SERP URLs, on-page parsing, keyword /
+  search-volume / trend data.
+- **WebFetch/WebSearch are blocked in the scheduled cloud environment (403)** — do not rely on them.
 - **Doctrine — the `seo-doctrine` skill** (read fresh every run, Step 1).
 
 > The Duda MCP `site_name` argument = the client's `clients.site_id` value.
@@ -46,7 +48,9 @@ than half-run:
 - **Supabase MCP** answers — the enrolled-clients query below returns without error (project
   `chikljxwgiskyjsnjelf`).
 - **Duda MCP** answers — e.g., `get_site_details` on one enrolled `site_id`.
-- **DataforSEO MCP** answers — needed for research.
+- **DataforSEO MCP** answers — needed for SEO data + backup sourcing.
+- **Tavily MCP** answers — primary web sourcing. If Tavily is down but DataforSEO works, proceed with
+  DataforSEO-only sourcing (degraded) and note it; if **both** are down, abort (can't source).
 
 If any required capability is missing → **abort the whole run, publish nothing,** and report exactly
 which connector/file was unavailable. Do **not** improvise around a missing research or publishing tool.
@@ -91,8 +95,10 @@ Read `auto_blog_mode` for the client:
   identically. Do not call the publish endpoint. Report the Duda editor/preview link for review.
 - **`auto_publish`** → publish through Duda so the post goes live, then capture the live URL.
 
-> **Global kill-switch.** If `CLAUDE.md` → "Go-live posture" is set to **HOLD ALL**, force every client
-> to `queue` behavior regardless of its mode. This is the master safety valve while the system is young.
+> **Global kill-switch (inline — the Routine cannot read `CLAUDE.md`).** **`HOLD_ALL = true`.** While
+> this is true, force **every** client to `queue` (draft) behavior regardless of its `auto_blog_mode` —
+> publish nothing live. This is the master safety valve; set it to `false` only once sourcing + quality
+> are proven.
 
 ---
 
@@ -176,15 +182,15 @@ relevant previous articles.
 ## Draft → QA → Publish (per client)
 
 ### Source the claims first (hard gate — where the bar is won or lost)
-Gather **real, attributable support** for the post's factual spine. **The scheduled cloud environment
-blocks raw outbound HTTP (WebFetch/WebSearch → 403), so source through the DataforSEO MCP**, which runs
-server-side:
-- `serp_organic_live_advanced` → the real ranking URLs + titles/snippets for the topic (authority
-  sources you can link and cite).
-- `on_page_content_parsing` / `on_page_instant_pages` → actually retrieve and read a specific source
-  page's content via DataforSEO — use this to verify a statistic *before* you cite it.
-- `keyword_overview` / search-volume / trends tools → real, citable demand data.
-- WebSearch/WebFetch only if they actually return content in this environment; never fabricate a fetch.
+Gather **real, attributable support** for the post's factual spine. Raw outbound HTTP is blocked in the
+cloud Routine (WebFetch/WebSearch → 403), so use the **hosted** MCPs, which run off-sandbox:
+- **Tavily (primary)** → search for real external evidence (industry reports, .gov/regulatory data,
+  studies, reputable articles), then use its extract tool to read the page and pull the exact stat plus
+  the real URL to cite.
+- **DataforSEO (SEO + backup)** → `serp_organic_live_advanced` for authority URLs,
+  `on_page_content_parsing`/`on_page_instant_pages` to read a page, `keyword_overview`/volume/trends for
+  citable demand data.
+- WebSearch/WebFetch only if they actually return content; never fabricate a fetch.
 
 Rules:
 - **Every non-brand factual or statistical claim must trace to a source you actually retrieved this run,
@@ -210,9 +216,9 @@ author byline if present, else the agency default.
 ### QA — every item is a kill gate
 Run the doctrine-compliance check (rule-by-rule verdict) plus the five non-negotiables:
 1. **No unsourced claims (hard kill).** Every factual/statistical claim links to a source you actually
-   retrieved this run (DataforSEO SERP / on-page parsing, or a working fetch); brand claims trace to
-   `story_summary`/`story_transcript`. **Any claim you could not source is CUT, not asserted** — a post
-   resting on unverifiable "facts" FAILS. (This is the gate the first posts missed.)
+   retrieved this run (Tavily or DataforSEO); brand claims trace to `story_summary`/`story_transcript`.
+   **Any claim you could not source is CUT, not asserted** — a post resting on unverifiable "facts"
+   FAILS. (This is the gate the first posts missed.)
 2. **Never invent citations.** Cite only URLs you actually fetched and read this run.
 3. **No fluff, no filler.** Nothing on the doctrine's "NEVER publish" list. Empty word count is worse
    than no post.

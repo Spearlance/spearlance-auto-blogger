@@ -61,9 +61,11 @@ use `read_only=true`; keep it `project_ref`-scoped.
 
 `routine.md` is run unattended on a schedule — no human confirms steps. Design implications baked into it:
 - **Preflight gate:** the run aborts cleanly if a required connector is missing. The biggest cloud risk
-  is that MCP servers authenticated interactively (Supabase, Duda, DataforSEO) **don't attach in a
-  headless run** — so the schedule **must** have those three connectors enabled, and the routine fails
-  loudly (publishes nothing) rather than half-running if they're absent.
+  is that MCP servers authenticated interactively (Supabase, Duda, DataforSEO, **Tavily** for web
+  sourcing) **don't attach in a headless run** — so the schedule **must** have those connectors enabled,
+  and the routine fails loudly (publishes nothing) rather than half-running if they're absent.
+  WebFetch/WebSearch are **blocked** in the cloud Routine (403); hosted MCPs (Tavily/DataforSEO) are how
+  it reaches the web.
 - **Hourly cron, calendar-driven:** most ticks do nothing — the routine runs the cheap due-check first
   and exits before reading the doctrine if no client is due. `POSTS_PER_RUN` (default 1) caps work per
   tick; the highest-priority / longest-waiting due client is served. Raise only to clear a backlog.
@@ -97,6 +99,7 @@ use `read_only=true`; keep it `project_ref`-scoped.
 
 Per-client, via `auto_blog_mode` (`queue` = draft/hold, `auto_publish` = live).
 
-**Global kill-switch:** **HOLD ALL** (current default). While set, the routine forces every client to
-draft (`queue`) behavior regardless of its mode, so output is sanity-checked first. Lift it by changing
-this line to **LIVE** once quality is proven; individual clients are then governed by their own mode.
+**Global kill-switch:** an inline **`HOLD_ALL`** flag lives in `routine.md` (the Routine can't read this
+file). While `HOLD_ALL = true` (current default), the routine forces every client to draft (`queue`)
+regardless of its mode, so output is sanity-checked first. Flip it to `false` in the pasted playbook once
+sourcing + quality are proven; individual clients are then governed by their own `auto_blog_mode`.
