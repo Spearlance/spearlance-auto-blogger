@@ -56,18 +56,28 @@ WHERE auto_blog_mode <> 'off' AND site_id IS NOT NULL AND site_id <> '';
 - Empty result → **nothing is enrolled; end the run** and report "no enrolled clients."
 - If invoked for a single `client_id` (test/dry-run), work only that client and skip the due/scope logic.
 
-### 0c. Decide who is *due* (cadence)
-`auto_blog_schedule` is freeform text; interpret it as a weekly target:
-`weekly`/`1x_week` → 1, `2x_week` → 2, `3x_week` → 3, `biweekly` → 0.5, `monthly` → ~0.25.
-No schedule → default **weekly** (conservative — set a client's `auto_blog_schedule` explicitly to go
-faster). A client is **due** when days since its last published post (`max` publish date from
-`list_blog_posts(site_id)`) ≥ `7 / weekly_target`.
+### 0c. Decide who is *due* (driven by the client's strategy, which the team sets)
+The team's only control surface is **strategy** in SpearlanceOS; the routine obeys it. Read it:
+```sql
+SELECT posting_frequency, selected_days, content_mix
+FROM public.blog_content_strategy
+WHERE client_id = '<client_id>'
+ORDER BY is_global ASC LIMIT 1;
+```
+- `selected_days` is the posting calendar (`[2,4]` = Tue/Thu; 0 = Sun). A client is **due this hour**
+  only if **today's weekday ∈ `selected_days`** AND it has **not already published today**
+  (`list_blog_posts(site_id)` shows no post dated today). No strategy row → default to one day/week.
+- `content_mix` (e.g. `{how_to:50, best_practices:50}`) sets the category balance to aim for over time —
+  bias topic selection (Step 4) toward under-represented categories.
 
-### 0d. Scope per run (cost guardrail)
-**`POSTS_PER_RUN = 2`** — the default (≈14 posts/week at a daily cron; covers ~9 weekly clients with
-catch-up headroom). *Change this one number to scale throughput.* Of the due clients, work the **most
-overdue first** (largest days-late ÷ target), produce up to `POSTS_PER_RUN` posts, then stop. One quality post per run, staggered across the roster, beats a long unbounded run and
-keeps token cost predictable. Process clients **one at a time**, fully. Everything below is **per client.**
+### 0d. Scope per tick (the routine runs HOURLY)
+The cron fires **hourly**, and most ticks correctly do nothing. **Order for cost: run the cheap
+due-check (0b + 0c) FIRST; if no client is due this hour, end the run immediately — before reading the
+doctrine or doing any research.** Only when ≥1 client is due do you go further.
+
+**`POSTS_PER_RUN = 1`** per tick — hourly cadence spreads the roster across the day on its own; raise
+only to clear a backlog. If several clients are due the same hour, take the **highest-priority /
+longest-waiting** one. Process clients one at a time, fully. Everything below is **per client.**
 
 ### Publishing posture (per client — replaces the old single global flag)
 
@@ -127,36 +137,68 @@ against its **primary source** (hard gate — never write from a snippet/headlin
 reactive post for the client it best fits. If nothing qualifies, proceed with a routine post. Reactive
 posts do not count against cadence.
 
-## Step 4 — Research & select the topic
+## Step 4 — Select (or generate) the topic, then research it
 
-1. **Cadence check.** Count this client's posts in the last 7 days (from `list_blog_posts`). If already
-   at the schedule target, stop this client and report "cadence met."
-2. **Research.** Use DataforSEO to surface keyword opportunities filtered against the client's
-   positioning, vertical, and geography (from the brand story / live site) — **not raw volume.**
-   - `dataforseo_labs_google_keyword_ideas` / `keyword_suggestions` — expand seeds.
-   - `keyword_overview` / `bulk_keyword_difficulty` — volume + difficulty.
-   - `search_intent` — confirm intent. `serp_organic_live_advanced` — see who ranks and whether we can
-     credibly beat them. Default location = the client's service area where local intent applies.
-3. **Select & plan.** Pick ONE topic mapped to a target keyword + intent that does **not** overlap an
-   existing post. Build an H2/H3 outline that follows the doctrine's structure rules and leads with the
-   client's strongest brand angle.
+**4a. Take the next due calendar topic, if one is usable.**
+```sql
+SELECT id, topic_title, summary, keywords, category, priority, suggested_publish_date
+FROM public.blog_topics
+WHERE client_id = '<client_id>' AND blog_post_id IS NULL
+  AND status NOT IN ('published','in_progress')
+  AND suggested_publish_date <= current_date
+ORDER BY priority DESC, suggested_publish_date ASC;
+```
+Use the top row **only if it is still relevant and in-season today**. **Skip stale / off-season topics**
+(e.g. a winter snow-removal topic surfaced in summer) — never dump a backlog of outdated planned posts.
+If you use one, mark it `in_progress` now (write-back, Publish step).
+
+**4b. If no usable calendar topic exists, GENERATE one and save it back** (expected for most clients —
+the routine sets its own topics):
+- Read `blog_ai_preferences` (`custom_instructions`, `topics_to_avoid`) and honor them — **never** pick
+  anything in `topics_to_avoid`.
+- Research with DataforSEO (`keyword_ideas`/`suggestions`, `keyword_overview`/`bulk_keyword_difficulty`,
+  `search_intent`, `serp_organic_live_advanced`) filtered against the client's positioning, vertical,
+  geography, and the under-weighted `content_mix` categories — **not raw volume**.
+- Dedup against the client's **previous articles** (`list_blog_posts`) — no overlap or cannibalization.
+- INSERT the topic into `blog_topics` (`client_id`, `topic_title`, `summary`, `keywords`, `category`,
+  `ai_generated=true`, `status='in_progress'`, `suggested_publish_date=current_date`); keep the new `id`.
+
+**4c. Plan.** Map the topic to a target keyword + intent. Build an H2/H3 outline that follows the
+doctrine's structure rules, leads with the client's strongest brand angle, and builds on / links to
+relevant previous articles.
 
 ---
 
 ## Draft → QA → Publish (per client)
 
+### Source the claims first (hard gate — where the bar is won or lost)
+Before drafting, gather **real external sources** for the factual spine of the post: fetch them with
+WebSearch/WebFetch (industry data, government/weather/regulatory figures, reputable studies). This is
+distinct from keyword research, and it is the step the first live posts skipped.
+- **Every non-brand factual or statistical claim must hyperlink to a real URL you fetched and read this
+  run.** Brand claims (differentiators, founder story) trace to `story_summary`/`story_transcript` — also
+  never fabricated.
+- **If you cannot fetch a usable external source for the topic, do NOT draft it** — pick/generate a
+  different topic or skip the client this tick. Zero external sources = automatic FAIL.
+- Keep the list of fetched source URLs to embed and to report.
+
 ### Draft
-Write to the SEO Doctrine blog-application layer (`seo-doctrine` skill): title/meta pattern, one H1 +
-≥4 H2s, 1,000+ words (1,500–2,000 target), 5–10 internal links with the doctrine's anchor mix,
-Article (+FAQ) schema. **Voice and substance come from the client's `story_summary`** — its marketing
+Write to the SEO Doctrine blog-application layer (`seo-doctrine` skill): title/meta pattern, **≥4 H2s
+and NO `<h1>` in the body**, 1,000+ words (1,500–2,000 target), 5–10 internal links with the doctrine's
+anchor mix, Article (+FAQ) schema.
+
+> **Duda renders the post title as the page's H1 automatically.** Do **not** repeat the title (or any
+> other `<h1>`) inside the content body — doing so creates a duplicate H1. The body must start at `<h2>`. **Voice and substance come from the client's `story_summary`** — its marketing
 angles, value propositions, and customer-voice samples — not generic filler. Audience framing is always
 "what this means for *this client's* customer." Respect `tone` and `words_to_avoid`. Use the client's
 configured author byline if present, else the agency default.
 
 ### QA — every item is a kill gate
 Run the doctrine-compliance check (rule-by-rule verdict) plus the five non-negotiables:
-1. **No claim without a real source.** Every factual/statistical claim has a real, fetched, reputable
-   source. Brand-story claims must be supported by the client's own `story_transcript`/`story_summary`.
+1. **No claim without a real source (hard kill).** Every factual/statistical claim hyperlinks to a real
+   URL fetched this run; brand claims trace to `story_summary`/`story_transcript`. **Count the external
+   citations in the drafted HTML — zero external links = automatic FAIL** (this is the gate the first
+   posts missed).
 2. **Never invent citations.** Cite only URLs you actually fetched and read this run.
 3. **No fluff, no filler.** Nothing on the doctrine's "NEVER publish" list. Empty word count is worse
    than no post.
@@ -175,10 +217,15 @@ Create the post in Duda (`create_blog_post`, `site_name=<site_id>`) with:
   it). Keep alt text descriptive and include the client's locale where natural.
 - **`queue`:** leave status UNPUBLISHED (draft). **`auto_publish`:** publish, then capture the live URL.
 
+**After publishing, write back to `blog_topics` (the one table the routine writes):** set
+`status='published'` and `blog_post_id` for the topic you used or created. This stops the next hourly
+tick from rewriting it. Write nothing else to SpearlanceOS; never call its `blog-*` edge functions.
+
 ## Step 5 — Record the run
 
-In read-only mode the system of record is **Duda** (the post itself) — there is no markdown ledger to
-maintain and you do **not** write back to SpearlanceOS. Keep only what the run report needs:
+The system of record for published content is **Duda** (the post itself); SpearlanceOS's `blog_topics`
+is updated only as described in the Publish step (status + `blog_post_id`). There is no markdown ledger.
+Keep only what the run report needs:
 - Per client: branch (routine/reactive), topic, target keyword + intent, Duda draft/live URL + status,
   internal links used, **every source URL cited**, and any feed items evaluated.
 - If nothing published for a client, record why (cadence met / bar not cleared / no qualifying feed item
