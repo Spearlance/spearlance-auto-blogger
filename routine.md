@@ -20,7 +20,9 @@ that client's branch, note why, and move on.
   read-only. Never call its `blog-*` edge functions. (The connector must NOT be configured `read_only`.)
 - **Publishing — Duda MCP.** `list_blog_posts`, `get_site_details`, `create_blog_post`,
   `update_blog_post`, `publish_blog_post`, scoped by the client's `site_id`.
-- **Research/sources — DataforSEO MCP, WebFetch, WebSearch.**
+- **Research/sources — DataforSEO MCP** (works server-side; this is your sourcing engine).
+  **WebFetch/WebSearch are blocked in the scheduled cloud environment (return 403) — do not rely on
+  them**; use only if they actually return content.
 - **Doctrine — the `seo-doctrine` skill** (read fresh every run, Step 1).
 
 > The Duda MCP `site_name` argument = the client's `clients.site_id` value.
@@ -174,15 +176,23 @@ relevant previous articles.
 ## Draft → QA → Publish (per client)
 
 ### Source the claims first (hard gate — where the bar is won or lost)
-Before drafting, gather **real external sources** for the factual spine of the post: fetch them with
-WebSearch/WebFetch (industry data, government/weather/regulatory figures, reputable studies). This is
-distinct from keyword research, and it is the step the first live posts skipped.
-- **Every non-brand factual or statistical claim must hyperlink to a real URL you fetched and read this
-  run.** Brand claims (differentiators, founder story) trace to `story_summary`/`story_transcript` — also
-  never fabricated.
-- **If you cannot fetch a usable external source for the topic, do NOT draft it** — pick/generate a
-  different topic or skip the client this tick. Zero external sources = automatic FAIL.
-- Keep the list of fetched source URLs to embed and to report.
+Gather **real, attributable support** for the post's factual spine. **The scheduled cloud environment
+blocks raw outbound HTTP (WebFetch/WebSearch → 403), so source through the DataforSEO MCP**, which runs
+server-side:
+- `serp_organic_live_advanced` → the real ranking URLs + titles/snippets for the topic (authority
+  sources you can link and cite).
+- `on_page_content_parsing` / `on_page_instant_pages` → actually retrieve and read a specific source
+  page's content via DataforSEO — use this to verify a statistic *before* you cite it.
+- `keyword_overview` / search-volume / trends tools → real, citable demand data.
+- WebSearch/WebFetch only if they actually return content in this environment; never fabricate a fetch.
+
+Rules:
+- **Every non-brand factual or statistical claim must trace to a source you actually retrieved this run,
+  with the real URL linked.** Brand claims (differentiators, founder story) trace to `story_summary`/
+  `story_transcript` — never fabricated.
+- **Any claim you cannot source, you CUT** — write a tighter, brand-led post rather than asserting
+  unverifiable "facts." Never invent a citation.
+- Keep the list of retrieved source URLs to embed and to report.
 
 ### Draft
 Write to the SEO Doctrine blog-application layer (`seo-doctrine` skill): title/meta pattern, **≥4 H2s
@@ -199,22 +209,26 @@ author byline if present, else the agency default.
 
 ### QA — every item is a kill gate
 Run the doctrine-compliance check (rule-by-rule verdict) plus the five non-negotiables:
-1. **No claim without a real source (hard kill).** Every factual/statistical claim hyperlinks to a real
-   URL fetched this run; brand claims trace to `story_summary`/`story_transcript`. **Count the external
-   citations in the drafted HTML — zero external links = automatic FAIL** (this is the gate the first
-   posts missed).
+1. **No unsourced claims (hard kill).** Every factual/statistical claim links to a source you actually
+   retrieved this run (DataforSEO SERP / on-page parsing, or a working fetch); brand claims trace to
+   `story_summary`/`story_transcript`. **Any claim you could not source is CUT, not asserted** — a post
+   resting on unverifiable "facts" FAILS. (This is the gate the first posts missed.)
 2. **Never invent citations.** Cite only URLs you actually fetched and read this run.
 3. **No fluff, no filler.** Nothing on the doctrine's "NEVER publish" list. Empty word count is worse
    than no post.
 4. **Doctrine adherence.** The compliance check must return SHIP (no FAIL on any hard gate: word count /
-   ≥4 H2, ≥5 links, schema, intent).
+   ≥4 H2, ≥5 links, intent). **Schema caveat:** Duda auto-applies **Article** schema to blog posts, and
+   **FAQ JSON-LD cannot be injected via the post body** (it needs Duda Settings → Custom HTML). So do
+   **not** fail QA on missing FAQ schema — include a clean FAQ section and flag it for manual schema add.
 5. If the draft cannot clear all of the above → **do not publish.** Note the attempt and reason; move on.
    A missed slot is acceptable. If a doctrine escalation trigger appears → ESCALATE to Garrett.
 
 ### Publish (obeying the client's posture from Step 0)
 Create the post in Duda (`create_blog_post`, `site_name=<site_id>`) with:
 - Optimized **meta title** and **meta description**.
-- Appropriate **schema** (Article, + FAQ where applicable).
+- **Schema.** Duda auto-applies **Article** schema to blog posts. Include a clean **FAQ section** in the
+  body where useful, but **FAQ JSON-LD must be added manually via Duda Settings → Custom HTML** (the
+  routine can't inject `<script>` through `create_blog_post`) — flag it in the report as a follow-up.
 - **Internal links** to real existing posts and service pages.
 - **Thumbnail / main image + alt text.** *Images are deferred:* use a Duda stock/search image for now
   (the in-app AI image pipeline is not wired here yet — `brand_guide` doesn't exist, so don't rely on
