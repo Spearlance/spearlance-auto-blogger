@@ -193,11 +193,14 @@ cloud Routine (WebFetch/WebSearch → 403), so use the **hosted** MCPs, which ru
 - WebSearch/WebFetch only if they actually return content; never fabricate a fetch.
 
 Rules:
-- **Every non-brand factual or statistical claim must trace to a source you actually retrieved this run,
-  with the real URL linked.** Brand claims (differentiators, founder story) trace to `story_summary`/
-  `story_transcript` — never fabricated.
-- **Any claim you cannot source, you CUT** — write a tighter, brand-led post rather than asserting
-  unverifiable "facts." Never invent a citation.
+- **Every objective statistic — percentages, growth figures, counts, dollar benchmarks, dates — MUST
+  link to a source you retrieved this run, or be CUT. No exceptions.** A precise-sounding stat with no
+  source (e.g. "ADU addresses grew 68% from 2021–2025") is a fabrication risk and an automatic FAIL.
+- **The client's own cost/price ranges are allowed only if explicitly framed as their estimate** — e.g.
+  "in our experience, a garage conversion runs $X–$Y" — never presented as objective published data.
+- Brand claims (differentiators, founder story) trace to `story_summary`/`story_transcript` — never
+  fabricated. **Prefer primary/authoritative sources** (city ordinance text, the Florida Building Code,
+  .gov/.edu) over vendor or insurance blogs wherever possible.
 - Keep the list of retrieved source URLs to embed and to report.
 
 ### Draft
@@ -215,10 +218,11 @@ author byline if present, else the agency default.
 
 ### QA — every item is a kill gate
 Run the doctrine-compliance check (rule-by-rule verdict) plus the five non-negotiables:
-1. **No unsourced claims (hard kill).** Every factual/statistical claim links to a source you actually
-   retrieved this run (Tavily or DataforSEO); brand claims trace to `story_summary`/`story_transcript`.
-   **Any claim you could not source is CUT, not asserted** — a post resting on unverifiable "facts"
-   FAILS. (This is the gate the first posts missed.)
+1. **No unsourced claims (hard kill).** Scan the draft for **every statistic and objective figure**;
+   each must (a) link to a source retrieved this run (Tavily or DataforSEO), (b) be reframed as the
+   client's own stated estimate, or (c) be CUT. **A precise unsourced stat (e.g. a growth %) = automatic
+   FAIL.** Brand claims trace to `story_summary`/`story_transcript`. (Partial sourcing is still a FAIL —
+   the Sunshine State post sourced ~40% of its figures and asserted the rest; that's the leak to close.)
 2. **Never invent citations.** Cite only URLs you actually fetched and read this run.
 3. **No fluff, no filler.** Nothing on the doctrine's "NEVER publish" list. Empty word count is worse
    than no post.
