@@ -1,0 +1,9 @@
+# OS / editor junk
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+
+# Local Claude Code overrides only — the seo-doctrine skill, agents, and routine MUST stay tracked
+.claude/settings.local.json

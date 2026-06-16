@@ -1,0 +1,65 @@
+# Content Ledger — Spearlance Auto Blogger
+
+The routine's memory across runs. Prevents duplicate topics, keyword cannibalization, and
+re-reactions. Every run appends here after publishing. Newest entries go at the top of "Produced
+by the routine".
+
+Each routine entry records: date, branch (A routine / B reactive), topic, target keyword + intent,
+published URL, sources cited, and any feed items processed.
+
+---
+
+## Produced by the routine
+
+_(none yet — first run pending)_
+
+<!--
+Template for a new entry:
+
+### 2026-06-16 · Branch A · <topic>
+- **Target keyword / intent:** <keyword> (informational | commercial | transactional | local)
+- **URL:** https://www.spearlance.com/blog/<slug>   [status: UNPUBLISHED | PUBLISHED]
+- **Internal links:** <pages linked>
+- **Sources cited:** <list of fetched URLs>
+- **Feed items processed this run:** <none | list — also logged in processed-feeds.jsonl>
+- **Notes:** <why it cleared the bar / anything notable>
+-->
+
+---
+
+## Pre-existing inventory (baseline as of 2026-06-15)
+
+Imported from Duda site `e8531a5e`. Use to avoid duplication and to find internal-link targets.
+Clusters: **PC** platform comparison · **LSEO** local SEO / lead gen · **WD** web design · **VG** vertical guide · **SB** small-business.
+
+| Publish date | Title | Path | Cluster | Status |
+|---|---|---|---|---|
+| 2025-07-19 | Duda vs. Squarespace: Which Platform Wins for Local Businesses? | `/duda-vs-squarespace-which-platform-wins-for-local-businesses` | PC | PUBLISHED |
+| 2025-04-04 | Local Landing Pages: How to Increase Your Organic Leads for Life | `/local-landing-pages-how-to-increase-your-organic-leads-for-life` | LSEO | PUBLISHED |
+| 2025-04-02 | How to Build a High-Quality Website in Under a Week Without Learning to Code | `/how-to-build-a-high-quality-website-in-under-a-week-without-learning-to-code` | WD | PUBLISHED |
+| 2025-03-31 | How AI is Changing Website Design: Should You Use AI to Build Your Site? | `/how-ai-is-changing-website-design-should-you-use-ai-to-build-your-site` | WD | PUBLISHED |
+| 2025-03-28 | What Makes a Website Effective? 7 Key Design Principles You Need | `/what-makes-a-website-effective-7-key-design-principles-you-need` | WD | PUBLISHED |
+| 2025-03-26 | GoHighLevel vs. Duda: Which is Better to Start Your Web Design Agency? | `/gohighlevel-vs-duda-which-is-better-to-start-your-web-design-agency` | PC | PUBLISHED |
+| 2025-03-21 | The Best All-in-One CRM for Freelancers: HighLevel vs. HoneyBook | `/the-best-all-in-one-crm-for-freelancers-highlevel-vs-honeybook` | PC | PUBLISHED |
+| 2025-02-28 | Best Website Builder for Local Businesses: How to Pick One That Actually Gets You Leads | `/blog/best-website-builder-for-local-businesses-how-to-pick-one-that-actually-gets-you-leads` | PC | PUBLISHED |
+| 2025-02-27 | Best AI Tools for Website Designers in 2025 | `/blog/best-ai-tools-for-website-designers-in-2025` | WD | PUBLISHED |
+| 2025-02-25 | How to Automate Your SEO to Get More Leads | `/blog/how-to-automate-your-seo-to-get-more-leads` | LSEO | PUBLISHED |
+| 2025-02-24 | WordPress to Duda Migration: How to Move Your Site Without Losing Rankings (2025 Guide) | `/blog/how-to-migrate-from-wordpress-to-duda-without-losing-seo-rankings` | PC | PUBLISHED |
+| 2025-02-20 | Duda vs. Webflow: Which Website Builder is Right for Your Business? | `/blog/duda-vs-webflow-which-website-builder-is-right-for-your-business` | PC | PUBLISHED |
+| 2025-02-20 | Why Duda is the Best Website Platform for Agencies | `/blog/why-duda-is-the-best-website-platform-for-agencies` | PC | PUBLISHED |
+| 2025-02-18 | The Ultimate Guide to Pediatric Clinic Websites | `/blog/the-ultimate-guide-to-pediatric-clinic-websites` | VG | PUBLISHED |
+| 2022-12-21 | 4 Ways to Get More Customer Reviews | `/blog/customer-reviews` | LSEO | PUBLISHED |
+| 2022-12-21 | 4 Ways to Market Your Small Business for Free | `/blog/free-marketing` | SB | PUBLISHED |
+| 2022-08-17 | Keyword Research for Local Business | `/blog/keyword-research` | LSEO | PUBLISHED |
+| 2022-08-09 | Guide to Construction Company SEO 2022 | `/blog/construction-company-seo` | VG | PUBLISHED |
+| 2022-07-27 | Local Lead Generation Strategies for Small Business | `/local-lead-generation` | LSEO | PUBLISHED |
+| 2022-07-18 | How Artificial Intelligence is Helping Small Businesses Grow | `/blog/artificial-intelligence` | SB | PUBLISHED |
+| 2022-07-11 | What is the Google Maps Pack? | `/blog/google-maps-pack` | LSEO | PUBLISHED |
+| 2023-03-23 | How Do Lead Generation Companies Work? | `/how-do-lead-generation-companies-work` | SB | UNPUBLISHED |
+| — | Demo | `/demo` | — | UNPUBLISHED (ignore) |
+
+**Coverage notes for topic selection:**
+- *Construction company SEO* exists but is dated **2022** — a refresh is fair game (mark as update, don't duplicate).
+- Platform-comparison cluster is saturated (Duda vs everything). Raise the bar before adding another.
+- No published post since **2025-07-19** — cadence has lapsed; re-establishing it is the immediate goal.
+- Thin verticals: only pediatric clinics + construction have dedicated guides. Medical (non-pediatric) and other home-service trades are open.

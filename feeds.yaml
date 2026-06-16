@@ -1,0 +1,54 @@
+# Monitored reactive sources for the Spearlance Auto Blogger.
+#
+# RSS is a DISCOVERY layer only. A new item is a trigger to LOOK, never content to write from.
+# The routine fetches the full primary source and writes from the verified article, never from
+# the feed snippet, headline, or a secondhand report.
+#
+# Verified 2026-06-15.
+
+sources:
+  - name: Google Search Central Blog
+    priority: highest
+    type: rss
+    url: https://developers.google.com/search/blog/feed.xml
+    watch_for: >
+      Core updates, algorithm / ranking changes, Search Console news.
+      Hits client rankings directly. Time-sensitive — ships same day when confirmed.
+
+  - name: Google Search Status — Ranking Updates History
+    priority: highest
+    type: json
+    url: https://status.search.google.com/incidents.json
+    atom_fallback: https://status.search.google.com/en/feed.atom
+    watch_for: >
+      Confirmed core & spam updates. Cleanest "did a confirmed update land" signal.
+      Filter to the Ranking product. Cross-check against the Search Central blog.
+
+  - name: Search Engine Roundtable
+    priority: high
+    type: rss
+    url: https://feeds.feedburner.com/SearchEngineRoundtable1
+    note: Direct https://www.seroundtable.com/feed/ returns 403 to bots; use this FeedBurner URL.
+    watch_for: Update chatter, often before Google confirms. Treat as a lead, not confirmation.
+
+  - name: Search Engine Land
+    priority: medium
+    type: rss
+    url: https://searchengineland.com/feed
+    watch_for: Broader SEO and paid-search industry coverage.
+
+  - name: OpenAI News
+    priority: medium
+    type: rss
+    url: https://openai.com/news/rss.xml
+    watch_for: >
+      Frontier model & product launches. Usually an evergreen "how a small business can
+      actually use this" angle — does not need to race out.
+
+  - name: Anthropic News
+    priority: medium
+    type: page-poll            # No public RSS feed exists (verified 2026-06-15: /rss.xml, /rss, /news/feed all 404).
+    url: https://www.anthropic.com/news
+    watch_for: >
+      Same as OpenAI. Fetch the index page, extract article links, diff against the ledger,
+      then fetch any genuinely new article as the primary source.

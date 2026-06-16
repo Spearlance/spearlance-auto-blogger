@@ -1,0 +1,3 @@
+# processed-feeds.jsonl — one JSON object per line. Lines starting with "#" are comments, skip them.
+# Schema: {"url": "<primary source url>", "source": "<feed name>", "title": "<item title>", "date_processed": "YYYY-MM-DD", "decision": "skipped|published", "reason": "<short>", "post_url": "<published url or null>"}
+# A URL appearing here has already been evaluated and must NOT trigger a reactive post again.
