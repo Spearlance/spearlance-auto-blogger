@@ -72,9 +72,13 @@ FROM public.blog_content_strategy
 WHERE client_id = '<client_id>'
 ORDER BY is_global ASC LIMIT 1;
 ```
-- `selected_days` is the posting calendar (`[2,4]` = Tue/Thu; 0 = Sun). A client is **due this hour**
-  only if **today's weekday ∈ `selected_days`** AND it has **not already published today**
-  (`list_blog_posts(site_id)` shows no post dated today). No strategy row → default to one day/week.
+- Compute today's weekday **once**: `SELECT extract(dow from current_date)` → **0 = Sun … 6 = Sat**.
+  `selected_days` uses the same integers (`[2,4]` = Tue/Thu).
+- **Client WITH a strategy:** due only if **today's dow ∈ `selected_days`** AND it has **not already
+  published today** (`list_blog_posts(site_id)` shows no post dated today).
+- **Client with NO strategy row → do NOT skip it.** Default to **weekly**: due if it has **no post in the
+  last 7 days** (`list_blog_posts(site_id)`), any weekday. Most enrolled clients have no strategy yet and
+  must still get content; setting `selected_days` later just pins them to specific days.
 - `content_mix` (e.g. `{how_to:50, best_practices:50}`) sets the category balance to aim for over time —
   bias topic selection (Step 4) toward under-represented categories.
 
@@ -246,8 +250,10 @@ Create the post in Duda (`create_blog_post`, `site_name=<site_id>`) with:
 - **`queue`:** leave status UNPUBLISHED (draft). **`auto_publish`:** publish, then capture the live URL.
 
 **After publishing, write back to `blog_topics` (the one table the routine writes):** set
-`status='published'` and `blog_post_id` for the topic you used or created. This stops the next hourly
-tick from rewriting it. Write nothing else to SpearlanceOS; never call its `blog-*` edge functions.
+**`status='published'`** on the topic you used or created — this is the done-marker that stops the next
+tick from rewriting it (Step 4a filters it out). Leave `blog_post_id` NULL: you publish to Duda, not to
+SpearlanceOS's `blog_posts`, so there's usually no UUID to set, and `status` alone is the dedup signal.
+Write nothing else to SpearlanceOS; never call its `blog-*` edge functions.
 
 ## Step 5 — Record the run
 
