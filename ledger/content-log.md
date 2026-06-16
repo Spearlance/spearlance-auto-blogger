@@ -11,7 +11,24 @@ published URL, sources cited, and any feed items processed.
 
 ## Produced by the routine
 
-_(none yet — first run pending)_
+### 2026-06-16 · Branch A · Google Business Profile Optimization
+- **Target keyword / intent:** "google business profile optimization" — 6,600/mo, KD 26, LOW competition (informational + commercial)
+- **URL:** https://www.spearlance.com/google-business-profile-optimization-the-step-by-step-guide-for-local-service-businesses   [status: UNPUBLISHED — HOLD FOR REVIEW]
+- **Duda post ID:** `9f116f8ff00e4f57a1e460f268c60013`
+- **Internal links (10):**
+  - `/blog/google-maps-pack` — "Google Maps Pack" (exact)
+  - `/about-us` — "Spearlance" (branded)
+  - `/local-landing-pages-how-to-increase-your-organic-leads-for-life` — "local landing page" (partial)
+  - `/blog/customer-reviews` — "4 ways to get more customer reviews" (partial)
+  - `/search-engine-marketing` — "search engine marketing" (exact)
+  - `/local-lead-generation` — "local lead generation" (exact)
+  - `/blog/how-to-automate-your-seo-to-get-more-leads` — "automating your local SEO" (partial)
+  - `/consultation` — "schedule a free consultation" (natural)
+  - `/blog/keyword-research` — "keyword research" (exact)
+  - `/ai-for-local-business` — "AI for local business" (partial)
+- **Sources cited:** DataforSEO keyword overview API (June 2026) — keyword volume, difficulty, and intent data for topic selection. All post content is expert guidance; no external statistical claims requiring citation.
+- **Feed items processed this run:** All 6 feeds evaluated via WebSearch (WebFetch returned 403 for all URLs in this cloud environment). Google Search Central blog and Search Status feeds surfaced the May 2026 core update (completed June 2) and a Google Search Console AI performance reports announcement (early June 2026). Both dropped per Branch B hard gate — could not verify against primary sources since WebFetch is blocked. OpenAI/Anthropic feeds surfaced Claude Fable 5 and other model launches — no immediate local-business implication strong enough to justify a same-day post. All feed items logged in processed-feeds.jsonl.
+- **Notes:** First run of the routine. Cadence was at 0/3 posts this week; this draft re-establishes it. Keyword gap confirmed — no existing GBP optimization content on site. Natural cluster with `/blog/google-maps-pack` (2022) and `/local-lead-generation`. WebFetch environment issue noted: all outbound HTTP fetches return 403 in this cloud run; reactive branch verification is impossible until resolved. FAQ schema included in post HTML as JSON-LD `<script>` block; Duda may strip `<script>` tags — manual verification recommended before publishing.
 
 <!--
 Template for a new entry:
