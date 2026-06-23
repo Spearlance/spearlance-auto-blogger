@@ -99,7 +99,7 @@ Read `auto_blog_mode` for the client:
   identically. Do not call the publish endpoint. Report the Duda editor/preview link for review.
 - **`auto_publish`** → publish through Duda so the post goes live, then capture the live URL.
 
-> **Global kill-switch (inline — the Routine cannot read `CLAUDE.md`).** **`HOLD_ALL = true`.** While
+> **Global kill-switch (inline — the Routine cannot read `CLAUDE.md`).** **`HOLD_ALL = false`.** While
 > this is true, force **every** client to `queue` (draft) behavior regardless of its `auto_blog_mode` —
 > publish nothing live. This is the master safety valve; set it to `false` only once sourcing + quality
 > are proven.
