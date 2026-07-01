@@ -74,17 +74,17 @@ ORDER BY is_global ASC LIMIT 1;
 ```
 - Compute today's weekday **once**: `SELECT extract(dow from current_date)` → **0 = Sun … 6 = Sat**.
   `selected_days` uses the same integers (`[2,4]` = Tue/Thu).
-- **"Post" here means ANY post `list_blog_posts` returns, regardless of `status` (UNPUBLISHED/draft
-  counts exactly like PUBLISHED) — go by `creation_date`, never `publish_date`.** While `HOLD_ALL` (or a
-  client's own `queue` mode) holds everything as a draft, `publish_date` never advances, so a check keyed
-  on it would see "nothing published, ever" and mark the client due on every single tick — this is a
-  known past failure mode that produced a new draft for the same client every day for two straight weeks.
-  Cadence tracks *content produced*, not *content live*.
+- **"Already posted today" means ANY post `list_blog_posts` returns, regardless of `status`
+  (UNPUBLISHED/draft counts exactly like PUBLISHED) — go by `creation_date`, never `publish_date`.**
+  While `HOLD_ALL` (or a client's own `queue` mode) holds everything as a draft, `publish_date` never
+  advances, so a same-day check keyed on it would never see today's own draft and could double-post.
+  Same-day dedup tracks *content produced today*, not *content live*.
 - **Client WITH a strategy:** due only if **today's dow ∈ `selected_days`** AND it has **not already
   posted today** (no post — any status — with `creation_date` = today).
-- **Client with NO strategy row → do NOT skip it.** Default to **weekly**: due if it has **no post — any
-  status — with `creation_date` in the last 7 days**, any weekday. Most enrolled clients have no strategy
-  yet and must still get content; setting `selected_days` later just pins them to specific days.
+- **Client with NO strategy row → do NOT skip it.** Default to **daily**: due every day it hasn't
+  **already posted today** (same any-status/`creation_date` check above), regardless of weekday. This is
+  intentional — clients without an explicit calendar are meant to get a fresh blog every day, not once a
+  week; `selected_days` is only for clients the team wants pinned to specific days instead.
 - `content_mix` (e.g. `{how_to:50, best_practices:50}`) sets the category balance to aim for over time —
   bias topic selection (Step 4) toward under-represented categories.
 
