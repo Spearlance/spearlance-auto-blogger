@@ -74,11 +74,17 @@ ORDER BY is_global ASC LIMIT 1;
 ```
 - Compute today's weekday **once**: `SELECT extract(dow from current_date)` → **0 = Sun … 6 = Sat**.
   `selected_days` uses the same integers (`[2,4]` = Tue/Thu).
+- **"Post" here means ANY post `list_blog_posts` returns, regardless of `status` (UNPUBLISHED/draft
+  counts exactly like PUBLISHED) — go by `creation_date`, never `publish_date`.** While `HOLD_ALL` (or a
+  client's own `queue` mode) holds everything as a draft, `publish_date` never advances, so a check keyed
+  on it would see "nothing published, ever" and mark the client due on every single tick — this is a
+  known past failure mode that produced a new draft for the same client every day for two straight weeks.
+  Cadence tracks *content produced*, not *content live*.
 - **Client WITH a strategy:** due only if **today's dow ∈ `selected_days`** AND it has **not already
-  published today** (`list_blog_posts(site_id)` shows no post dated today).
-- **Client with NO strategy row → do NOT skip it.** Default to **weekly**: due if it has **no post in the
-  last 7 days** (`list_blog_posts(site_id)`), any weekday. Most enrolled clients have no strategy yet and
-  must still get content; setting `selected_days` later just pins them to specific days.
+  posted today** (no post — any status — with `creation_date` = today).
+- **Client with NO strategy row → do NOT skip it.** Default to **weekly**: due if it has **no post — any
+  status — with `creation_date` in the last 7 days**, any weekday. Most enrolled clients have no strategy
+  yet and must still get content; setting `selected_days` later just pins them to specific days.
 - `content_mix` (e.g. `{how_to:50, best_practices:50}`) sets the category balance to aim for over time —
   bias topic selection (Step 4) toward under-represented categories.
 
