@@ -74,11 +74,18 @@ ORDER BY is_global ASC LIMIT 1;
 ```
 - Compute today's weekday **once**: `SELECT extract(dow from current_date)` → **0 = Sun … 6 = Sat**.
   `selected_days` uses the same integers (`[2,4]` = Tue/Thu).
-- **Client WITH a strategy:** due only if **today's dow ∈ `selected_days`** AND it has **not already
-  published today** (`list_blog_posts(site_id)` shows no post dated today).
-- **Client with NO strategy row → do NOT skip it.** Default to **weekly**: due if it has **no post in the
-  last 7 days** (`list_blog_posts(site_id)`), any weekday. Most enrolled clients have no strategy yet and
-  must still get content; setting `selected_days` later just pins them to specific days.
+- **Gate on post *existence*, not publish status.** While `HOLD_ALL = true` (or any client is in
+  `queue` mode), every post this routine creates stays UNPUBLISHED forever — it never acquires a
+  `publish_date`. Gating the due-check on "already published" is therefore never true, the client
+  never looks satisfied, and the same client gets a fresh duplicate draft on every single tick. Check
+  `list_blog_posts(site_id)` for a post with **`creation_date` (not `publish_date`) falling in the
+  window**, regardless of its `status` (`UNPUBLISHED` counts same as `PUBLISHED`).
+- **Client WITH a strategy:** due only if **today's dow ∈ `selected_days`** AND no post was **created**
+  today (`creation_date` = today in `list_blog_posts(site_id)`, any status).
+- **Client with NO strategy row → do NOT skip it.** Default to **weekly**: due if it has **no post
+  created in the last 7 days** (`creation_date` in `list_blog_posts(site_id)`, any status), any weekday.
+  Most enrolled clients have no strategy yet and must still get content; setting `selected_days` later
+  just pins them to specific days.
 - `content_mix` (e.g. `{how_to:50, best_practices:50}`) sets the category balance to aim for over time —
   bias topic selection (Step 4) toward under-represented categories.
 
