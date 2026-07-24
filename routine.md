@@ -113,15 +113,11 @@ Every post you create in Duda is left **UNPUBLISHED (draft)** — `auto_blog_mod
 puts each draft in front of her.
 
 ### Open the run log (per client)
-Before doing any research or drafting, insert a row into `blog_auto_runs` so this attempt is tracked:
-```sql
-INSERT INTO public.blog_auto_runs (client_id, trigger_type, status)
-VALUES ('<client_id>', 'scheduled', 'running')
-RETURNING id;
-```
-Use `trigger_type='manual'` only when invoked ad hoc for a single `client_id` (Step 0b). Keep the
-returned `id` as `<run_id>` — you update this same row once, at the end of this client's processing (see
-Publish, below), whether or not a draft ended up being created.
+Before doing any research or drafting, insert a row into `blog_auto_runs` so this attempt is tracked —
+see the `spearlanceos-blog-pipeline` skill (`.claude/skills/spearlanceos-blog-pipeline/SKILL.md`) for the
+exact insert. Use `trigger_type='manual'` only when invoked ad hoc for a single `client_id` (Step 0b).
+Keep the returned `id` as `<run_id>` — you update this same row once, at the end of this client's
+processing (see Publish, below), whether or not a draft ended up being created.
 
 ---
 
@@ -270,64 +266,20 @@ Create the post in Duda (`create_blog_post`, `site_name=<site_id>`) — always a
 
 Capture the created post's Duda id (and preview/editor URL) from the response — the writes below need it.
 
-**Then write back to SpearlanceOS — four writes, every time a draft is created:**
+**Then write back to SpearlanceOS.** Read `.claude/skills/spearlanceos-blog-pipeline/SKILL.md` for the
+exact column names, status values, and copy-pasteable SQL for each of these — the sequence is:
 
-1. **`blog_topics`** — mark the topic done so the next tick doesn't reselect it:
-   ```sql
-   UPDATE public.blog_topics SET status = 'published' WHERE id = '<topic_id>';
-   ```
+1. **`blog_topics`** — mark the topic done (`status='published'`) so the next tick doesn't reselect it.
    (This means "turned into a post," not "live" — the convention the table already uses.)
-
-2. **`blog_posts`** — the actual review/schedule record Mila works from:
-   ```sql
-   INSERT INTO public.blog_posts (
-     client_id, title, slug, meta_description, content, excerpt, focus_keyword, target_keywords,
-     featured_image_url, featured_image_alt, status, duda_page_id, topic_id, auto_run_id,
-     quality_scores, generation_metadata, ai_model
-   ) VALUES (
-     '<client_id>', '<title>', '<slug>', '<meta_description>', '<full HTML content>',
-     '<intro/excerpt>', '<target_keyword>', ARRAY['<kw1>','<kw2>', ...],
-     '<thumbnail_url>', '<thumbnail_alt>', 'draft', '<duda_post_id>', '<topic_id>', '<run_id>',
-     '<jsonb — the §1..§14.3 doctrine QA verdict>',
-     '<jsonb — source URLs cited, keyword data used, internal links used>', 'claude-sonnet-5'
-   );
-   ```
-   `status` is always `'draft'` here — never `'scheduled'` or `'published'`. Mila's review is what moves
-   it forward; that's her job, not the routine's.
-
-3. **`blog_auto_runs`** — close out the run log opened at the top of this client's processing:
-   ```sql
-   UPDATE public.blog_auto_runs
-   SET status = 'completed', articles_generated = 1, articles_passed_gate = 1,
-       topics_generated = <0 or 1 — 1 if Step 4b generated a new topic>, completed_at = now(),
-       research_summary = '<jsonb — sources + keyword data used>'
-   WHERE id = '<run_id>';
-   ```
-   If this client's branch was stopped instead (QA fail, no fuel, no strategy row, doctrine halt,
-   escalation) — update the same row with `status='failed'`, `error_log='<why>'`,
-   `articles_generated=0`, `completed_at=now()` instead. Every opened run log gets closed one way or the
-   other before you move to the next client.
-
-4. **`tasks` + `task_assignees`** — give Mila something to act on (only when a draft was created):
-   ```sql
-   -- the client's default "To Do" column
-   SELECT id FROM public.task_columns WHERE client_id = '<client_id>' AND key = 'to_do' LIMIT 1;
-   -- look up Mila by email, not a hardcoded id, in case her account ever changes
-   SELECT id FROM public.profiles WHERE email = 'mila@spearlance.com';
-
-   INSERT INTO public.tasks (
-     client_id, title, description, status, priority, assignee_user_id, column_id, due_date
-   ) VALUES (
-     '<client_id>', 'Review & schedule: <post title>',
-     'Draft ready in Duda: <duda editor/preview URL>. Keyword: <target_keyword>. Category: <category>. '
-       || 'Sources cited: <n>. Doctrine QA: SHIP.',
-     'to_do', 'normal', '<mila_profile_id>', '<todo_column_id>', current_date + 2
-   )
-   RETURNING id;
-
-   INSERT INTO public.task_assignees (task_id, user_id) VALUES ('<new_task_id>', '<mila_profile_id>');
-   ```
-   If the client has no `'to_do'` `task_columns` row (rare), omit `column_id` rather than guess one.
+2. **`blog_posts`** — insert one row for the article: `status='draft'` always, linking `topic_id` and
+   `auto_run_id`, with the doctrine QA verdict in `quality_scores`. This is the actual review/schedule
+   record Mila works from — never insert it as `'scheduled'` or `'published'`; that's her call to make.
+3. **`blog_auto_runs`** — close out the row opened at the top of this client's processing:
+   `status='completed'` with the article/topic counts if a draft was created; `status='failed'` with
+   `error_log` set if the branch was stopped instead (QA fail, no fuel, no strategy row, doctrine halt,
+   escalation). Every opened run log gets closed one way or the other before you move to the next client.
+4. **`tasks` + `task_assignees`** — only when a draft was created: one task assigned to Mila (looked up
+   by email, in the client's `'to_do'` `task_columns` column), so she knows to check and schedule it.
 
 Write nothing else to SpearlanceOS; never call its `blog-*` edge functions.
 

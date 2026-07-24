@@ -85,6 +85,10 @@ read-only). The connector must therefore **not** use `read_only=true`; keep it `
   - `doctrine.md` — full vendored doctrine (18 sections). `SEO-Doctrine.pdf` — source of truth.
   - Vendored 2026-06-15 from the separate `SEO Doctrine` workspace so this project is self-contained
     for cloud runs. To update, re-copy both files; the PDF wins on any conflict.
+- `.claude/skills/spearlanceos-blog-pipeline/` — schema reference for the four SpearlanceOS tables a
+  post moves through (`blog_topics`, `blog_posts`, `blog_auto_runs`, `tasks`/`task_assignees`): exact
+  columns, status values, and copy-pasteable SQL. `routine.md`'s Publish step points here instead of
+  inlining the SQL; useful for any other session touching this pipeline too (Mila's queue, backfills).
 
 > The markdown ledger from the single-client version is retired: `blog_posts` (SpearlanceOS) is the
 > system of record for each drafted article's review/schedule/publish state, `blog_auto_runs` is the
