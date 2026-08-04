@@ -14,8 +14,10 @@ acceptable. Shipping weak content is not.
   thinking layer — research, judgment, doctrine QA — that the dumb single-call alternatives can't do.
 - **Body (SpearlanceOS).** The agency's Supabase app holds client identity, Duda `site_id`, brand
   stories, the **content strategy/calendar**, and enrollment. The routine **reads** it via the Supabase
-  MCP and writes back to **one table only** — `blog_topics` (the topic it used/created, marked done). It
-  touches nothing else and never invokes SpearlanceOS's `blog-*` edge functions.
+  MCP and writes to four tables: `blog_topics` (the topic used/created), `blog_posts` (one row per
+  drafted article — Mila's draft/schedule/publish queue), `blog_auto_runs` (one row per client
+  processed, logging what happened), and `tasks` + `task_assignees` (one review task per article,
+  assigned to Mila). It touches nothing else and never invokes SpearlanceOS's `blog-*` edge functions.
 - **Publishing (Duda MCP).** Posts are created/published on each client's Duda site, scoped by `site_id`.
 
 > Why not use SpearlanceOS's own `blog-auto-*` functions? They're single LLM API calls (one prompt →
@@ -24,8 +26,10 @@ acceptable. Shipping weak content is not.
 ## Where client data lives (SpearlanceOS Supabase)
 
 Reach it with the Supabase MCP `execute_sql`, project id **`chikljxwgiskyjsnjelf`** (read-mostly — the
-routine writes **only** `blog_topics`; everything else is read-only). The connector must therefore **not**
-use `read_only=true`; keep it `project_ref`-scoped.
+routine writes only `blog_topics`, `blog_posts`, `blog_auto_runs`, `tasks`, and `task_assignees`;
+everything else is read-only). The connector must therefore **not** use `read_only=true`; keep it
+`project_ref`-scoped. See `.claude/skills/spearlanceos-blog-pipeline/SKILL.md` for exact column names
+and copy-pasteable SQL for every write.
 
 - **`clients`** — `name`, `site_id` (= Duda site/`site_name`), `website_url`, `status`, and the
   enrollment columns **`auto_blog_mode`** (`off` | `queue` | `auto_publish`) + **`auto_blog_schedule`**
@@ -47,10 +51,15 @@ use `read_only=true`; keep it `project_ref`-scoped.
 - A client is worked when `auto_blog_mode <> 'off'`. The working set is whatever is enrolled — turn
   clients on/off in SpearlanceOS; the routine picks up the change. **You** set the mode; the routine
   only reads it.
-- `queue` = publish as Duda **draft (hold for review)**; `auto_publish` = **publish live**. This is the
-  per-client version of the old single hold flag.
+- The routine **never publishes live**, regardless of `auto_blog_mode`. Every post is created as an
+  unpublished Duda draft; `auto_blog_mode` (`queue` vs `auto_publish`) is purely an enrollment flag now
+  — it no longer changes routine behavior. Mila reviews and publishes/schedules every draft herself via
+  the `tasks` queue the routine writes.
 - **Scheduling is calendar-driven:** a client is *due* when today's weekday ∈ its
-  `blog_content_strategy.selected_days` and it hasn't already posted today.
+  `blog_content_strategy.selected_days`. A client with no strategy row is not due — flag it in the
+  report rather than inventing a cadence. There is currently no per-client daily draft cap, so a due
+  client with no strategy change can come up again on a later tick the same day; the routine does a
+  light re-verification rather than a full re-run in that case (see `routine.md` Step 0d).
 - **Caveat (as of 2026-06-16):** most enrolled clients have **no** `blog_topics` yet, and the few that do
   (Invictus, Sunshine State) are stale/off-season — so the routine mostly **generates** topics until
   calendars are populated/freshened. 9 clients have a completed brand story (best fuel): Invictus, Trophy
@@ -97,9 +106,8 @@ use `read_only=true`; keep it `project_ref`-scoped.
 
 ## Go-live posture
 
-Per-client, via `auto_blog_mode` (`queue` = draft/hold, `auto_publish` = live).
-
-**Global kill-switch:** an inline **`HOLD_ALL`** flag lives in `routine.md` (the Routine can't read this
-file). While `HOLD_ALL = true` (current default), the routine forces every client to draft (`queue`)
-regardless of its mode, so output is sanity-checked first. Flip it to `false` in the pasted playbook once
-sourcing + quality are proven; individual clients are then governed by their own `auto_blog_mode`.
+**The routine never publishes live.** Every Duda post it creates is left unpublished. Mila reviews each
+draft (surfaced via the `blog_posts` queue and a `tasks` row assigned to her) and publishes or schedules
+it herself. `auto_blog_mode` (`queue` | `auto_publish`) now only gates enrollment (Step 0b:
+`auto_blog_mode <> 'off'`); it does not change what the routine does with a finished draft. There is no
+`HOLD_ALL` kill-switch in the current playbook — the draft-only posture *is* the standing safety valve.
