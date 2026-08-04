@@ -16,12 +16,14 @@ starts erroring with an unknown-column message, since SpearlanceOS may add colum
 
 ```sql
 INSERT INTO public.blog_auto_runs (client_id, trigger_type, status)
-VALUES ('<client_id>', 'cron', 'running')
+VALUES ('<client_id>', 'scheduled', 'running')
 RETURNING id;
 ```
 
-- `trigger_type`: `'cron'` for the normal hourly tick; `'manual'` only when invoked ad hoc for a
-  single `client_id` (routine.md Step 0b).
+- `trigger_type` has a check constraint — only `'scheduled'` (the normal hourly tick) or `'manual'`
+  (invoked ad hoc for a single `client_id`, routine.md Step 0b) are allowed. `'cron'` will fail the
+  constraint.
+- `status` also has a check constraint — only `'running'` / `'completed'` / `'failed'`.
 - Keep the returned `id` as `<run_id>` — every other write below references it.
 
 ## 2. `blog_topics` — mark the topic used
