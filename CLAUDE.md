@@ -56,6 +56,10 @@ use `read_only=true`; keep it `project_ref`-scoped.
   calendars are populated/freshened. 9 clients have a completed brand story (best fuel): Invictus, Trophy
   Electric, Grounded Columbus, Perennial Empire, The Estate at Oak Hollow, Kassthetics, MyHomeVineyard,
   National Signing Services, Game Gen.
+- **Correction (confirmed 2026-08-05 via live query):** Sunshine State also has `story_completed = true`
+  with a full `story_summary` (John Belizario's immigrant/subcontractor-to-licensed-GC story, full-service
+  positioning) — the "9 clients" list above is stale and undercounts by at least one. Re-verify
+  `client_brand_voice.story_completed` per-client rather than trusting this roster.
 
 ## Autonomous execution (scheduled Claude Routine)
 
