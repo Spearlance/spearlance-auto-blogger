@@ -74,11 +74,25 @@ ORDER BY is_global ASC LIMIT 1;
 ```
 - Compute today's weekday **once**: `SELECT extract(dow from current_date)` → **0 = Sun … 6 = Sat**.
   `selected_days` uses the same integers (`[2,4]` = Tue/Thu).
-- **Client WITH a strategy:** due only if **today's dow ∈ `selected_days`** AND it has **not already
-  published today** (`list_blog_posts(site_id)` shows no post dated today).
-- **Client with NO strategy row → do NOT skip it.** Default to **weekly**: due if it has **no post in the
-  last 7 days** (`list_blog_posts(site_id)`), any weekday. Most enrolled clients have no strategy yet and
-  must still get content; setting `selected_days` later just pins them to specific days.
+- **Daily cap (hard gate, checked before anything else, applies to every client every day):** the
+  routine runs hourly, but a client gets **at most one article per calendar day**, full stop — being
+  "due" all day (e.g. a Mon–Fri client) is not license to draft again on every tick that lands on a due
+  day. Check whether the client has already been accounted for today:
+  ```sql
+  SELECT 1 FROM public.blog_auto_runs
+  WHERE client_id = '<client_id>'
+    AND status = 'completed'
+    AND created_at >= current_date
+  LIMIT 1;
+  ```
+  If this returns a row, the client is **not due** — skip it for the rest of today, regardless of
+  `selected_days` or how many more hourly ticks land before midnight.
+- **Client WITH a strategy:** due only if **today's dow ∈ `selected_days`** AND the daily cap above
+  hasn't already been hit today.
+- **Client with NO strategy row → do NOT skip it.** Default to **weekly**: due if it has **no completed
+  `blog_auto_runs` row in the last 7 days** (which also satisfies the daily cap). Most enrolled clients
+  have no strategy yet and must still get content; setting `selected_days` later just pins them to
+  specific days.
 - `content_mix` (e.g. `{how_to:50, best_practices:50}`) sets the category balance to aim for over time —
   bias topic selection (Step 4) toward under-represented categories.
 
@@ -87,9 +101,10 @@ The cron fires **hourly**, and most ticks correctly do nothing. **Order for cost
 due-check (0b + 0c) FIRST; if no client is due this hour, end the run immediately — before reading the
 doctrine or doing any research.** Only when ≥1 client is due do you go further.
 
-**`POSTS_PER_RUN = 1`** per tick — hourly cadence spreads the roster across the day on its own; raise
-only to clear a backlog. If several clients are due the same hour, take the **highest-priority /
-longest-waiting** one. Process clients one at a time, fully. Everything below is **per client.**
+**`POSTS_PER_RUN = 1`** per tick — the 0c daily cap (not hourly cadence) is what keeps a client from
+getting more than one article a day; raise only to clear a backlog. If several clients are due the same
+hour, take the **highest-priority / longest-waiting** one. Process clients one at a time, fully.
+Everything below is **per client.**
 
 ### Publishing posture (per client — replaces the old single global flag)
 
