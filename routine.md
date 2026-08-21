@@ -74,11 +74,17 @@ ORDER BY is_global ASC LIMIT 1;
 ```
 - Compute today's weekday **once**: `SELECT extract(dow from current_date)` → **0 = Sun … 6 = Sat**.
   `selected_days` uses the same integers (`[2,4]` = Tue/Thu).
-- **Client WITH a strategy:** due only if **today's dow ∈ `selected_days`** AND it has **not already
-  published today** (`list_blog_posts(site_id)` shows no post dated today).
+- **Client WITH a strategy:** due only if **today's dow ∈ `selected_days`** AND it has **not already had
+  a `blog_posts` row created today** for it (`SELECT 1 FROM blog_posts WHERE client_id = '<client_id>'
+  AND created_at::date = current_date`) — check this every tick, not just once. Every enrolled client's
+  strategy is capped at **3 selected_days/week**; don't add more without asking Garrett first. This
+  same-day check is also enforced as a hard **database trigger** on `blog_posts` (any second insert for
+  the same client on the same day is rejected) — added 2026-08-21 after a config gap let two clients get
+  drafted on nearly every hourly tick for weeks, producing 140+ and 66+ unreviewed drafts. Treat a
+  trigger rejection as "already done today," not a real failure.
 - **Client with NO strategy row → do NOT skip it.** Default to **weekly**: due if it has **no post in the
   last 7 days** (`list_blog_posts(site_id)`), any weekday. Most enrolled clients have no strategy yet and
-  must still get content; setting `selected_days` later just pins them to specific days.
+  must still get content; setting `selected_days` later just pins them to specific days (cap at 3/week).
 - `content_mix` (e.g. `{how_to:50, best_practices:50}`) sets the category balance to aim for over time —
   bias topic selection (Step 4) toward under-represented categories.
 
