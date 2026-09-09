@@ -2,21 +2,30 @@
 
 Multi-client blogging routine, run unattended on an **hourly** schedule. For each **enrolled client**
 that is *due* per its strategy, it reads the doctrine, loads the brand story, selects or generates the
-topic, **researches and sources it**, QAs against the SEO Doctrine, and publishes to that client's
+topic, **researches and sources it**, QAs against the SEO Doctrine, and creates a draft on that client's
 **Duda** site — no external feed reader, scheduler service, or aggregator.
 
 **The bar is authority, not volume.** Every post earns its place or it does not ship. Missing a slot is
 acceptable. Shipping weak content is not.
 
+**It never publishes live.** Every post lands as an unpublished Duda draft, for every client, always —
+a teammate (Mila) reviews and publishes it herself. This is a standing part of the workflow, not a
+temporary safety valve; see Go-live posture below.
+
 ## Architecture: brain + body
 
-- **Brain (this repo).** The agentic playbook (`routine.md`) + the `seo-doctrine` skill. This is the
-  thinking layer — research, judgment, doctrine QA — that the dumb single-call alternatives can't do.
+- **Brain (this repo).** The agentic playbook (`routine.md`) + the `seo-doctrine` skill +
+  `spearlanceos-blog-pipeline` skill. This is the thinking layer — research, judgment, doctrine QA —
+  that the dumb single-call alternatives can't do.
 - **Body (SpearlanceOS).** The agency's Supabase app holds client identity, Duda `site_id`, brand
   stories, the **content strategy/calendar**, and enrollment. The routine **reads** it via the Supabase
-  MCP and writes back to **one table only** — `blog_topics` (the topic it used/created, marked done). It
-  touches nothing else and never invokes SpearlanceOS's `blog-*` edge functions.
-- **Publishing (Duda MCP).** Posts are created/published on each client's Duda site, scoped by `site_id`.
+  MCP and writes to five tables: `blog_topics` (the topic used/created), `blog_posts` (one row per
+  drafted article — Mila's review/schedule queue), `blog_auto_runs` (one row per client processed, the
+  run log), and `tasks` + `task_assignees` (one review task per article, assigned to Mila). It touches
+  nothing else and never invokes SpearlanceOS's `blog-*` edge functions. Exact columns/SQL/status values
+  are in `.claude/skills/spearlanceos-blog-pipeline/SKILL.md`.
+- **Publishing (Duda MCP).** Draft posts are created on each client's Duda site, scoped by `site_id`.
+  Never published through the connector — that's Mila's call.
 
 > Why not use SpearlanceOS's own `blog-auto-*` functions? They're single LLM API calls (one prompt →
 > article), not research + sourcing + doctrine QA. The whole point of this routine is the brain.
@@ -24,8 +33,10 @@ acceptable. Shipping weak content is not.
 ## Where client data lives (SpearlanceOS Supabase)
 
 Reach it with the Supabase MCP `execute_sql`, project id **`chikljxwgiskyjsnjelf`** (read-mostly — the
-routine writes **only** `blog_topics`; everything else is read-only). The connector must therefore **not**
-use `read_only=true`; keep it `project_ref`-scoped.
+routine writes only `blog_topics`, `blog_posts`, `blog_auto_runs`, `tasks`, `task_assignees`; everything
+else is read-only). The connector must therefore **not** use `read_only=true`; keep it
+`project_ref`-scoped. This is production — see the `supabase-prod-guard` skill; these five tables are
+the routine's designed, standing, scheduled write surface, not an ad hoc write, but nothing beyond them.
 
 - **`clients`** — `name`, `site_id` (= Duda site/`site_name`), `website_url`, `status`, and the
   enrollment columns **`auto_blog_mode`** (`off` | `queue` | `auto_publish`) + **`auto_blog_schedule`**
@@ -46,16 +57,16 @@ use `read_only=true`; keep it `project_ref`-scoped.
 
 - A client is worked when `auto_blog_mode <> 'off'`. The working set is whatever is enrolled — turn
   clients on/off in SpearlanceOS; the routine picks up the change. **You** set the mode; the routine
-  only reads it.
-- `queue` = publish as Duda **draft (hold for review)**; `auto_publish` = **publish live**. This is the
-  per-client version of the old single hold flag.
+  only reads it. `auto_blog_mode` (`queue` vs `auto_publish`) is enrollment-only now — it no longer
+  changes publish behavior (every post is always a draft; see Go-live posture below).
 - **Scheduling is calendar-driven:** a client is *due* when today's weekday ∈ its
-  `blog_content_strategy.selected_days` and it hasn't already posted today.
-- **Caveat (as of 2026-06-16):** most enrolled clients have **no** `blog_topics` yet, and the few that do
-  (Invictus, Sunshine State) are stale/off-season — so the routine mostly **generates** topics until
-  calendars are populated/freshened. 9 clients have a completed brand story (best fuel): Invictus, Trophy
-  Electric, Grounded Columbus, Perennial Empire, The Estate at Oak Hollow, Kassthetics, MyHomeVineyard,
-  National Signing Services, Game Gen.
+  `blog_content_strategy.selected_days`. A client with no strategy row is not due — the routine doesn't
+  invent a cadence for it.
+- **Guard, not a DB constraint:** the routine caps itself to one `blog_posts` draft per client per day
+  by checking `blog_posts` before drafting (there is no unique index enforcing this). If you see many
+  same-day `blog_auto_runs` rows logging the guard blocking the same due clients, the cron is firing
+  more often than the intended hourly cadence — that's an infra issue to fix in the schedule, not a
+  doctrine problem.
 
 ## Autonomous execution (scheduled Claude Routine)
 
@@ -63,7 +74,7 @@ use `read_only=true`; keep it `project_ref`-scoped.
 - **Preflight gate:** the run aborts cleanly if a required connector is missing. The biggest cloud risk
   is that MCP servers authenticated interactively (Supabase, Duda, DataforSEO, **Tavily** for web
   sourcing) **don't attach in a headless run** — so the schedule **must** have those connectors enabled,
-  and the routine fails loudly (publishes nothing) rather than half-running if they're absent.
+  and the routine fails loudly (creates no drafts) rather than half-running if they're absent.
   WebFetch/WebSearch are **blocked** in the cloud Routine (403); hosted MCPs (Tavily/DataforSEO) are how
   it reaches the web.
 - **Hourly cron, calendar-driven:** most ticks do nothing — the routine runs the cheap due-check first
@@ -81,25 +92,30 @@ use `read_only=true`; keep it `project_ref`-scoped.
   - `doctrine.md` — full vendored doctrine (18 sections). `SEO-Doctrine.pdf` — source of truth.
   - Vendored 2026-06-15 from the separate `SEO Doctrine` workspace so this project is self-contained
     for cloud runs. To update, re-copy both files; the PDF wins on any conflict.
+- `.claude/skills/spearlanceos-blog-pipeline/` — exact table schemas, status values, and
+  copy-pasteable SQL for the `blog_topics`/`blog_posts`/`blog_auto_runs`/`tasks`/`task_assignees`
+  write-back. Reconstructed 2026-09-09 from the live schema; keep it in sync with reality, not prose.
 
-> The markdown ledger from the single-client version is retired: Duda's own post list is the system of
-> record for published content (dedup uses `list_blog_posts` per site), and `blog_topics` tracks topic
-> state. Doctrine note: it calls sites "custom-coded" — they're Duda sites published through the
-> connector; ignore that framing.
+> The markdown ledger from the single-client version is retired. **`blog_posts`** (SpearlanceOS) is the
+> system of record for a drafted article's review/schedule/publish state; **`blog_auto_runs`** is the
+> system of record for what each tick did; Duda's post list is still used for dedup
+> (`list_blog_posts` per site) and is the system of record for the post content itself. `blog_topics`
+> tracks topic state. Doctrine note: it calls sites "custom-coded" — they're Duda sites published
+> through the connector; ignore that framing.
 
 ## Non-negotiable rules (full text in `routine.md`)
 
 1. No claim without a real, fetched source (brand-story claims must trace to the client's own story).
 2. Never invent citations — cite only URLs actually fetched and read.
 3. No fluff, no filler.
-4. Every draft is checked against the SEO Doctrine before it is eligible to publish.
-5. Publishes only when the bar is cleared.
+4. Every draft is checked against the SEO Doctrine before it is eligible to be created.
+5. A draft is created only when the bar is cleared.
 
 ## Go-live posture
 
-Per-client, via `auto_blog_mode` (`queue` = draft/hold, `auto_publish` = live).
-
-**Global kill-switch:** an inline **`HOLD_ALL`** flag lives in `routine.md` (the Routine can't read this
-file). While `HOLD_ALL = true` (current default), the routine forces every client to draft (`queue`)
-regardless of its mode, so output is sanity-checked first. Flip it to `false` in the pasted playbook once
-sourcing + quality are proven; individual clients are then governed by their own `auto_blog_mode`.
+**Every post is always an unpublished Duda draft, for every client.** `auto_blog_mode` (`queue` vs
+`auto_publish`) is enrollment-only — it does not change publish behavior; the routine never calls
+`publish_blog_post`. Mila reviews each draft (surfaced via the `blog_posts` row and a `tasks` entry
+assigned to her) and schedules or publishes it herself. This superseded the earlier per-client
+`queue`/`auto_publish` + inline `HOLD_ALL` kill-switch design described in older commits — there is no
+live-publish path left to hold.
