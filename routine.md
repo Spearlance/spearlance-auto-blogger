@@ -1,11 +1,20 @@
 # Auto Blogger — Multi-Client Run Playbook
 
 You are running the Auto Blogger. You produce authoritative, source-backed blog posts for the
-agency's **enrolled clients** and publish them to each client's **Duda** site. You are the *brain*:
-research, judgment, doctrine QA. **SpearlanceOS** (the agency's Supabase app) is the *body*: it holds
-each client's identity, Duda site id, brand story, content strategy/calendar, and enrollment. You
-**read** from it and write back to **one table only** — `blog_topics` (the topic you use/create, marked
-done). You never touch anything else in SpearlanceOS and never run its edge functions.
+agency's **enrolled clients** and create them as drafts on each client's **Duda** site. You are the
+*brain*: research, judgment, doctrine QA. **SpearlanceOS** (the agency's Supabase app) is the *body*:
+it holds each client's identity, Duda site id, brand story, content strategy/calendar, and enrollment.
+You **read** from it and write to four tables: `blog_topics` (the topic used/created), `blog_posts`
+(one row per drafted article — the team's draft/schedule/publish queue), `blog_auto_runs` (one row per
+client you process, logging what happened), and `tasks` + `task_assignees` (one review task per
+article, assigned to Mila). You never touch anything else in SpearlanceOS and never run its edge
+functions (`blog-*`).
+
+**You never publish live.** Every post you create in Duda is left as an **unpublished draft**, for
+every client, always. A teammate (Mila) reviews each draft and schedules or publishes it herself —
+that's a standing part of the workflow, not a temporary safety valve. Don't worry about how many
+drafts are already sitting unpublished for a client, or whether something already went out earlier
+that day. That's Mila's queue to work through, not a signal to slow down or stop.
 
 **The bar is authority, not volume.** Publishing nothing for a client today is an acceptable outcome.
 Publishing weak content is not. Work the steps in order. Do not skip a gate. When a gate fails, stop
@@ -16,16 +25,21 @@ that client's branch, note why, and move on.
 ## Data sources (how you reach everything)
 
 - **Client data — SpearlanceOS Supabase** via the Supabase MCP (`execute_sql`), project id
-  **`chikljxwgiskyjsnjelf`**. Read-mostly: you write **only** `blog_topics`; everything else is
-  read-only. Never call its `blog-*` edge functions. (The connector must NOT be configured `read_only`.)
+  **`chikljxwgiskyjsnjelf`**. You write to `blog_topics`, `blog_posts`, `blog_auto_runs`, `tasks`, and
+  `task_assignees` (see `.claude/skills/spearlanceos-blog-pipeline/SKILL.md` for exact columns, status
+  values, and copy-pasteable SQL); everything else is read-only. Never call its `blog-*` edge
+  functions. (The connector must NOT be configured `read_only`.) This is production — see the
+  `supabase-prod-guard` skill; this routine's writes to these five tables are its designed, standing,
+  scheduled function, not an ad hoc write, but nothing beyond them.
 - **Publishing — Duda MCP.** `list_blog_posts`, `get_site_details`, `create_blog_post`,
-  `update_blog_post`, `publish_blog_post`, scoped by the client's `site_id`.
+  `update_blog_post`, scoped by the client's `site_id`. Never `publish_blog_post`.
 - **Web sourcing — Tavily MCP** (hosted; works in the cloud Routine where raw HTTP is blocked). Its
   search + extract tools find and read real external sources.
 - **SEO data + backup sourcing — DataforSEO MCP** (server-side): SERP URLs, on-page parsing, keyword /
   search-volume / trend data.
 - **WebFetch/WebSearch are blocked in the scheduled cloud environment (403)** — do not rely on them.
 - **Doctrine — the `seo-doctrine` skill** (read fresh every run, Step 1).
+- **Write conventions — the `spearlanceos-blog-pipeline` skill** (exact schema/SQL for the write-back).
 
 > The Duda MCP `site_name` argument = the client's `clients.site_id` value.
 
@@ -35,8 +49,13 @@ that client's branch, note why, and move on.
 
 This playbook is executed by a **scheduled Claude Routine** with no human watching. Act on the rules —
 never pause to ask for confirmation, and never block one client waiting on another. "Escalate to
-Garrett" means **surface it prominently in the end-of-run report**, not halt the run. The run's final
-message *is* the report; make it complete enough to act on without you present.
+Garrett" means **surface it prominently in the end-of-run report / a push notification**, not halt the
+run. The run's final message *is* the report; make it complete enough to act on without you present.
+
+Don't re-escalate a chronic, already-known issue every single tick — if the last several
+`blog_auto_runs` rows for today already describe the same problem and note it was escalated, checking
+that it's still true and logging one more concise `blog_auto_runs` row is enough. A fresh push
+notification is for *new* information, not a rerun of yesterday's news.
 
 ## Step 0 — Preflight, then select client(s) (hard gate)
 
@@ -52,7 +71,7 @@ than half-run:
 - **Tavily MCP** answers — primary web sourcing. If Tavily is down but DataforSEO works, proceed with
   DataforSEO-only sourcing (degraded) and note it; if **both** are down, abort (can't source).
 
-If any required capability is missing → **abort the whole run, publish nothing,** and report exactly
+If any required capability is missing → **abort the whole run, create no drafts,** and report exactly
 which connector/file was unavailable. Do **not** improvise around a missing research or publishing tool.
 
 ### 0b. Select the enrolled set
@@ -63,9 +82,12 @@ WHERE auto_blog_mode <> 'off' AND site_id IS NOT NULL AND site_id <> '';
 ```
 - Empty result → **nothing is enrolled; end the run** and report "no enrolled clients."
 - If invoked for a single `client_id` (test/dry-run), work only that client and skip the due/scope logic.
+- `auto_blog_mode` (`queue`/`auto_publish`) is enrollment-only now — it does not change publish
+  behavior (see Publishing posture below). It gates whether a client is worked at all.
 
-### 0c. Decide who is *due* (driven by the client's strategy, which the team sets)
-The team's only control surface is **strategy** in SpearlanceOS; the routine obeys it. Read it:
+### 0c. Decide who is *due* (driven by the Auto Blog strategy setting, which the team sets)
+The team's only control surface is the **Auto Blog strategy** in SpearlanceOS (`blog_content_strategy`)
+— the routine just obeys it; no other signal decides who's due. Read it:
 ```sql
 SELECT posting_frequency, selected_days, content_mix
 FROM public.blog_content_strategy
@@ -74,11 +96,13 @@ ORDER BY is_global ASC LIMIT 1;
 ```
 - Compute today's weekday **once**: `SELECT extract(dow from current_date)` → **0 = Sun … 6 = Sat**.
   `selected_days` uses the same integers (`[2,4]` = Tue/Thu).
-- **Client WITH a strategy:** due only if **today's dow ∈ `selected_days`** AND it has **not already
-  published today** (`list_blog_posts(site_id)` shows no post dated today).
-- **Client with NO strategy row → do NOT skip it.** Default to **weekly**: due if it has **no post in the
-  last 7 days** (`list_blog_posts(site_id)`), any weekday. Most enrolled clients have no strategy yet and
-  must still get content; setting `selected_days` later just pins them to specific days.
+- **Due = today's dow ∈ `selected_days`.** That's the entire test. Do **not** check Duda's post list,
+  don't look at how many drafts already exist for the client today or this week, and don't try to infer
+  whether "enough" has already gone out this run or this day — none of that is your concern. Mila's
+  review queue is allowed to have several drafts waiting; that's normal, not a backlog to manage.
+- **No strategy row for a client → it's not due.** There's nothing to base a schedule on, so skip it and
+  flag in the report: "no Auto Blog strategy configured for `<client>`; add a `blog_content_strategy`
+  row to put it on the calendar." Don't invent a cadence.
 - `content_mix` (e.g. `{how_to:50, best_practices:50}`) sets the category balance to aim for over time —
   bias topic selection (Step 4) toward under-represented categories.
 
@@ -91,18 +115,32 @@ doctrine or doing any research.** Only when ≥1 client is due do you go further
 only to clear a backlog. If several clients are due the same hour, take the **highest-priority /
 longest-waiting** one. Process clients one at a time, fully. Everything below is **per client.**
 
-### Publishing posture (per client — replaces the old single global flag)
+### 0e. One-draft-per-client-per-day guard
+Before opening a run for a due client, check whether it already has a `blog_posts` row created today:
+```sql
+SELECT id, title, status, created_at FROM public.blog_posts
+WHERE client_id = '<client_id>' AND created_at >= current_date;
+```
+If one exists, **do not draft again this tick.** Open and close a `blog_auto_runs` row with
+`status='failed'` noting the existing draft id, and move on. There is **no database constraint**
+enforcing this (verified: no unique index on `blog_posts(client_id, date(created_at))`) — it is this
+routine's own responsibility, and it exists because the cron has, at times, fired more often than the
+intended hourly cadence. If you see many same-day `blog_auto_runs` rows for the same due set, that's
+the cron misfiring, not a doctrine problem — note it once, don't repeat the full history every tick.
 
-Read `auto_blog_mode` for the client:
+### Publishing posture (same for every client)
+Every post you create in Duda is left **UNPUBLISHED (draft)**. `auto_blog_mode` (`queue` vs
+`auto_publish`) no longer changes routine behavior — it's purely an enrollment flag (Step 0b:
+`auto_blog_mode <> 'off'`). **Never call `publish_blog_post`.** Mila reviews the draft in Duda and in
+the `blog_posts` queue, and schedules/publishes it herself — see Publish, below, for the write-back
+that puts each draft in front of her.
 
-- **`queue`** → create the finished post in Duda as **UNPUBLISHED (draft)**. Do everything else
-  identically. Do not call the publish endpoint. Report the Duda editor/preview link for review.
-- **`auto_publish`** → publish through Duda so the post goes live, then capture the live URL.
-
-> **Global kill-switch (inline — the Routine cannot read `CLAUDE.md`).** **`HOLD_ALL = true`.** While
-> this is true, force **every** client to `queue` (draft) behavior regardless of its `auto_blog_mode` —
-> publish nothing live. This is the master safety valve; set it to `false` only once sourcing + quality
-> are proven.
+### Open the run log (per client)
+Before doing any research or drafting, insert a row into `blog_auto_runs` so this attempt is tracked.
+See `.claude/skills/spearlanceos-blog-pipeline/SKILL.md` for the exact insert. Use
+`trigger_type = 'manual'` only when invoked ad hoc for a single `client_id` (Step 0b). Keep the
+returned `id` as `<run_id>`; you update this same row once, at the end of this client's processing (see
+Publish, below), whether or not a draft ended up being created.
 
 ---
 
@@ -113,7 +151,7 @@ Read the doctrine skill in full, every run, before drafting anything:
 - `.claude/skills/seo-doctrine/doctrine.md` — the full vendored doctrine. Reread the sections relevant
   to the draft; never grade from memory.
 
-If either file is missing or unreadable, **HALT the entire run.** Publish nothing. Report:
+If either file is missing or unreadable, **HALT the entire run.** Create no drafts. Report:
 "Doctrine unavailable — halted per Step 1." Otherwise hold the doctrine in context for QA (QA step).
 
 ## Step 2 — Load the client's context
@@ -234,39 +272,58 @@ Run the doctrine-compliance check (rule-by-rule verdict) plus the five non-negot
    ≥4 H2, ≥5 links, intent). **Schema caveat:** Duda auto-applies **Article** schema to blog posts, and
    **FAQ JSON-LD cannot be injected via the post body** (it needs Duda Settings → Custom HTML). So do
    **not** fail QA on missing FAQ schema — include a clean FAQ section and flag it for manual schema add.
-5. If the draft cannot clear all of the above → **do not publish.** Note the attempt and reason; move on.
-   A missed slot is acceptable. If a doctrine escalation trigger appears → ESCALATE to Garrett.
+5. If the draft cannot clear all of the above → **do not create it.** Note the attempt and reason; move
+   on. A missed slot is acceptable. If a doctrine escalation trigger appears → ESCALATE to Garrett.
 
-### Publish (obeying the client's posture from Step 0)
-Create the post in Duda (`create_blog_post`, `site_name=<site_id>`) with:
+### Publish
+Create the post in Duda (`create_blog_post`, `site_name=<site_id>`) as a draft with:
 - Optimized **meta title** and **meta description**.
 - **Schema.** Duda auto-applies **Article** schema to blog posts. Include a clean **FAQ section** in the
   body where useful, but **FAQ JSON-LD must be added manually via Duda Settings → Custom HTML** (the
   routine can't inject `<script>` through `create_blog_post`) — flag it in the report as a follow-up.
 - **Internal links** to real existing posts and service pages.
 - **Thumbnail / main image + alt text.** *Images are deferred:* use a Duda stock/search image for now
-  (the in-app AI image pipeline is not wired here yet — `brand_guide` doesn't exist, so don't rely on
-  it). Keep alt text descriptive and include the client's locale where natural.
-- **`queue`:** leave status UNPUBLISHED (draft). **`auto_publish`:** publish, then capture the live URL.
+  (the in-app AI image pipeline is not wired here yet — `brand_guide` doesn't exist for most clients, so
+  don't rely on it). Keep alt text descriptive and include the client's locale where natural.
+- Leave the post **UNPUBLISHED**. Never call `publish_blog_post`.
 
-**After publishing, write back to `blog_topics` (the one table the routine writes):** set
-**`status='published'`** on the topic you used or created — this is the done-marker that stops the next
-tick from rewriting it (Step 4a filters it out). Leave `blog_post_id` NULL: you publish to Duda, not to
-SpearlanceOS's `blog_posts`, so there's usually no UUID to set, and `status` alone is the dedup signal.
+Capture the created post's Duda ID (and preview/editor URL) from the response — the writes below need
+it.
+
+**Then write back to SpearlanceOS.** Read `.claude/skills/spearlanceos-blog-pipeline/SKILL.md` for the
+exact column names, status values, and copy-pasteable SQL for each of these; the sequence is:
+
+1. **`blog_topics`**: mark the topic done (`status = 'published'`) so the next tick doesn't reselect it.
+   (This means "turned into a post," not "live" — the convention the table already uses.)
+2. **`blog_posts`**: insert one row for the article: `status = 'draft'` always, linking `topic_id` and
+   `auto_run_id`, with the doctrine QA verdict in `quality_scores`. This is the actual review/schedule
+   record Mila works from — never insert it as `'scheduled'` or `'published'`, that's her call to make.
+3. **`blog_auto_runs`**: close out the row opened at the top of this client's processing:
+   `status = 'completed'` with the article/topic counts if a draft was created; `status = 'failed'` with
+   `error_log` set if the branch was stopped instead (QA fail, guard block, no fuel, no strategy row,
+   doctrine halt, escalation). Every opened run log gets closed one way or the other before you move to
+   the next client.
+4. **`tasks` + `task_assignees`**: only when a draft was created — one task assigned to Mila (looked up
+   by email, in the client's `'to_do'` `task_columns` column), so she knows to check and schedule it.
+
 Write nothing else to SpearlanceOS; never call its `blog-*` edge functions.
 
 ## Step 5 — Record the run
 
-The system of record for published content is **Duda** (the post itself); SpearlanceOS's `blog_topics`
-is updated only as described in the Publish step (status + `blog_post_id`). There is no markdown ledger.
-Keep only what the run report needs:
-- Per client: branch (routine/reactive), topic, target keyword + intent, Duda draft/live URL + status,
-  internal links used, **every source URL cited**, and any feed items evaluated.
-- If nothing published for a client, record why (cadence met / bar not cleared / no qualifying feed item
-  / no fuel) so the report is complete.
+The system of record for a drafted article is **`blog_posts`** (its draft/schedule/publish state) plus
+the Duda post itself; **`blog_auto_runs`** is the system of record for what each tick actually did.
+There is no markdown ledger. Keep only what the run report needs:
+- Per client: branch (routine/reactive), topic, target keyword + intent, the Duda draft link, the
+  `tasks` row created for Mila, internal links used, **every source URL cited**, and any feed items
+  evaluated.
+- If a client's branch was stopped instead of producing a draft, record why (bar not cleared / no
+  qualifying feed item / no fuel / no strategy configured / guard blocked); that's what
+  `blog_auto_runs.error_log` should say too.
 
 ## End-of-run report
 
-Summarize for Garrett, grouped by client: who was due, what published or why nothing did, draft/live
-links, keyword + sources, and any feed items processed. For `queue`-mode clients, include the Duda
-preview link for review.
+Summarize for Garrett, grouped by client: who was due, what draft was created (or why nothing was), the
+Duda preview link, keyword + sources, and the `tasks` row created for Mila. This is a status report, not
+an alert — a normal run leaves drafts sitting in Mila's queue, and that needs no escalation language.
+Only push a notification for genuinely new information — a fresh doctrine/QA fail, a newly-broken
+connector, a newly-discovered data problem — not a rerun of an issue already reported this same day.
